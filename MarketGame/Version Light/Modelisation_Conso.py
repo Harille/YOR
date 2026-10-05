@@ -23,11 +23,22 @@ T_SEUIL = 15.0
 AFFINER_AU_QUART_HEURE = True
 
 DOSSIER = Path(__file__).parent
+DONNEES = DOSSIER / "donnees"           # ce que fournit le prof : on ne l'ecrit jamais
+SORTIES = DOSSIER / "sorties"           # ce que le code produit : efface-le quand tu veux
+SORTIES.mkdir(exist_ok=True)
+
+
+def entree(*morceaux):
+    """Un fichier d'entree : dans donnees/, ou a cote des scripts (ancienne disposition)."""
+    dans_donnees = DONNEES.joinpath(*morceaux)
+    return dans_donnees if dans_donnees.exists() else DOSSIER.joinpath(*morceaux)
+
+
 FICHIERS = {
-    "RES1": DOSSIER / "RES1_BASE.csv",
-    "PRO1": DOSSIER / "PRO1_BASE.csv",
-    "gradients": DOSSIER / "gradients.csv",
-    "temperature": DOSSIER / "temperature_2025.csv",
+    "RES1": entree("RES1_BASE.csv"),
+    "PRO1": entree("PRO1_BASE.csv"),
+    "gradients": entree("gradients.csv"),
+    "temperature": entree("temperature_2025.csv"),
 }
 
 
@@ -239,23 +250,23 @@ def main():
 
     hist = calculer_puissances(base)
     resume(hist, f"BACKTEST {an_source} - temperature realisee")
-    hist.to_csv(DOSSIER / f"courbe_de_charge_{an_source}.csv", sep=";", decimal=",")
+    hist.to_csv(SORTIES / f"courbe_de_charge_{an_source}.csv", sep=";", decimal=",")
 
     if ANNEE_CIBLE is None or ANNEE_CIBLE == an_source:
         return hist, hist
 
     cible = calculer_puissances(calendrier.projeter(base, ANNEE_CIBLE))
     resume(cible, f"LIVRABLE T1 {ANNEE_CIBLE} - temperature normale, portefeuille au 22/09/2026")
-    cible.to_csv(DOSSIER / f"courbe_de_charge_{ANNEE_CIBLE}.csv", sep=";", decimal=",")
+    cible.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}.csv", sep=";", decimal=",")
 
     t2 = reviser_t2(cible)
     e1 = energies(cible)["P_dyn_totale_kW"]
     e2 = energies(t2)["P_dyn_totale_kW"]
     resume(t2, f"LIVRABLE T2 {ANNEE_CIBLE} - portefeuille revise au 01/12/2026")
     print(f"\n  revision commerciale : {e1:,.0f} -> {e2:,.0f} MWh ({e2 / e1 - 1:+.2%})")
-    t2.to_csv(DOSSIER / f"courbe_de_charge_{ANNEE_CIBLE}_T2.csv", sep=";", decimal=",")
+    t2.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}_T2.csv", sep=";", decimal=",")
 
-    print(f"\n-> Exports : courbe_de_charge_{an_source}.csv, courbe_de_charge_{ANNEE_CIBLE}.csv,"
+    print(f"\n-> Exports dans sorties/ : courbe_de_charge_{an_source}.csv, courbe_de_charge_{ANNEE_CIBLE}.csv,"
           f" courbe_de_charge_{ANNEE_CIBLE}_T2.csv")
     return hist, cible
 

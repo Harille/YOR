@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 
 import calendrier
-from Modelisation_Conso import (ANNEE_CIBLE, DOSSIER, calculer_puissances,
+from Modelisation_Conso import (ANNEE_CIBLE, SORTIES, entree, calculer_puissances,
                                 construire_base, pas_horaire, reviser_t2)
 
 ANNEE_HISTORIQUE = 2021
@@ -57,7 +57,7 @@ def _normaliser(texte):
 
 
 def _fichier(genre, annee):
-    chemin = DOSSIER / "historique" / f"{genre}_{annee}.csv"
+    chemin = entree("historique", f"{genre}_{annee}.csv")
     if not chemin.exists():
         raise FileNotFoundError(f"{chemin} est introuvable.")
     return chemin
@@ -263,9 +263,9 @@ def main():
           f"{forward_t2_anticipe(sc['niveau'], 0.5):>10,.2f} EUR/MWh"
           f"   (reel : {FORWARD_CAL27_T2:.2f})")
 
-    sortie = DOSSIER / f"scenario_{ANNEE_HISTORIQUE}_{ANNEE_CIBLE}.csv"
+    sortie = SORTIES / f"scenario_{ANNEE_HISTORIQUE}_{ANNEE_CIBLE}.csv"
     sc["courbe"].to_csv(sortie, sep=";", decimal=",")
-    print(f"\n-> Export : {sortie.name}")
+    print(f"\n-> Export : sorties/{sortie.name}")
     return sc["courbe"]
 
 

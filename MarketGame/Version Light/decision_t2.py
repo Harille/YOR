@@ -4,7 +4,7 @@ import pandas as pd
 
 import comparaison_scenarios as cp
 import scenarios as sc
-from Modelisation_Conso import DOSSIER, construire_base
+from Modelisation_Conso import SORTIES, construire_base
 
 JOUR_SPOT = "2027-01-01"          # vendredi ferie
 STRATEGIE_T1 = "Notre strategie 70/20/10"
@@ -203,9 +203,9 @@ def main():
     print(f"  a acheter au day-ahead : {pos['position normale MW'].clip(lower=0).sum():,.1f} MWh"
           f" | a revendre : {-pos['position normale MW'].clip(upper=0).sum():,.1f} MWh")
 
-    pos.to_csv(DOSSIER / "position_ouverte_20270101.csv", sep=";", decimal=",")
-    options.to_csv(DOSSIER / "decision_t2.csv", sep=";", decimal=",")
-    print("\n-> Exports : decision_t2.csv, position_ouverte_20270101.csv")
+    pos.to_csv(SORTIES / "position_ouverte_20270101.csv", sep=";", decimal=",")
+    options.to_csv(SORTIES / "decision_t2.csv", sep=";", decimal=",")
+    print("\n-> Exports dans sorties/ : decision_t2.csv, position_ouverte_20270101.csv")
     return options, pos, mix_final
 
 

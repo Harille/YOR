@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 
 import scenarios as sc
-from Modelisation_Conso import DOSSIER, construire_base, masque_peak
+from Modelisation_Conso import SORTIES, construire_base, masque_peak
 
 ANNEES = [2021, 2023, 2024]
 MOIS_HIVER = [1, 2, 3, 11, 12]
@@ -351,10 +351,10 @@ def main():
         print(f"    {forme:<18} -> meilleure esperance : {t['esperance'].idxmax()}"
               f" ({t['esperance'].max():.2f}) | admissible : {choisir(t) or 'aucune'}")
 
-    tableau(scenarios, probabilites).to_csv(DOSSIER / "comparaison_scenarios.csv",
+    tableau(scenarios, probabilites).to_csv(SORTIES / "comparaison_scenarios.csv",
                                             sep=";", decimal=",")
-    strat.to_csv(DOSSIER / "comparaison_strategies.csv", sep=";", decimal=",")
-    print("\n-> Exports : comparaison_scenarios.csv, comparaison_strategies.csv")
+    strat.to_csv(SORTIES / "comparaison_strategies.csv", sep=";", decimal=",")
+    print("\n-> Exports dans sorties/ : comparaison_scenarios.csv, comparaison_strategies.csv")
     return strat, scenarios, volumes_q
 
 

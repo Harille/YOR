@@ -1,0 +1,2 @@
+Tout ce que le code ecrit atterrit ici : CSV et figures/.
+Effacable sans risque, lancer.py le reconstruit.

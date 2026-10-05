@@ -1,0 +1,3 @@
+Les fichiers de donnees du prof vont ici.
+Voir la liste dans le README, section "Ce qu'il faut mettre dans donnees/".
+Ils ne sont pas dans le depot : ce sont les sources fournies en cours.

@@ -6,7 +6,7 @@ import pandas as pd
 import calendrier
 import comparaison_scenarios as cp
 import scenarios as sc
-from Modelisation_Conso import (CLIENTS, DOSSIER, PARAMS, calculer_puissances,
+from Modelisation_Conso import (CLIENTS, SORTIES, PARAMS, calculer_puissances,
                                 coefficient_meteo, construire_base, fud, _totaliser)
 
 JOUR = "2027-01-01"
@@ -172,9 +172,9 @@ def main():
           f" | a revendre {-h['position MW'].clip(upper=0).sum():,.1f} MWh")
 
     ordre_spot(h)
-    action.to_csv(DOSSIER / "t3_reequilibrage.csv", sep=";", decimal=",")
-    h.to_csv(DOSSIER / "t3_position_20270101.csv", sep=";", decimal=",")
-    print("\n-> Exports : t3_reequilibrage.csv, t3_position_20270101.csv")
+    action.to_csv(SORTIES / "t3_reequilibrage.csv", sep=";", decimal=",")
+    h.to_csv(SORTIES / "t3_position_20270101.csv", sep=";", decimal=",")
+    print("\n-> Exports dans sorties/ : t3_reequilibrage.csv, t3_position_20270101.csv")
     return action, h
 
 
