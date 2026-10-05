@@ -8,11 +8,15 @@ import calendrier
 
 ANNEE_CIBLE = 2027
 
-PARAMS = {                                      # portefeuille au T1 (22/09/2026)
+PARAMS = {                                      # reference : portefeuille au T1
     "RES1": {"nb_clients": 200_000, "puissance_souscrite": 4.5, "theta": 0.0521},
     "PRO1": {"nb_clients": 5_000, "puissance_souscrite": 36.0, "theta": 0.08004},
 }
-REVISION_T2 = {"RES1": -0.059, "PRO1": -0.083}  # Commercial forecast du 01/12/2026
+CLIENTS = {                                     # previsions commerciales successives
+    "T1": {"RES1": 200_000, "PRO1": 5_000},     # 22/09/2026
+    "T2": {"RES1": 188_200, "PRO1": 4_585},     # 01/12/2026  (-5,9 % / -8,3 %)
+    "T3": {"RES1": 191_531, "PRO1": 4_745},     # 31/12/2026  (-4,5 % / -5,1 % vs T1)
+}
 
 COEF_COL = "COEFFICIENT_PREPARE"
 T_SEUIL = 15.0
@@ -109,13 +113,17 @@ def _totaliser(out):
     return out
 
 
-def reviser_t2(df):
-    """Portefeuille du 01/12/2026 : la puissance est lineaire en nombre de clients."""
+def reviser(df, jalon="T2"):
+    """Portefeuille a un jalon donne : la puissance est lineaire en nombre de clients."""
     out = df.copy()
-    for profil, variation in REVISION_T2.items():
+    for profil, nb in CLIENTS[jalon].items():
+        facteur = nb / PARAMS[profil]["nb_clients"]
         for col in (f"P_{profil}_kW", f"P_dyn_{profil}_kW"):
-            out[col] = df[col] * (1 + variation)
+            out[col] = df[col] * facteur
     return _totaliser(out)
+
+
+reviser_t2 = reviser                            # ancien nom, conserve pour scenarios.py
 
 
 def pas_horaire(df):

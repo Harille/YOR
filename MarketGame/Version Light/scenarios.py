@@ -14,27 +14,30 @@ PRIME_DE_RISQUE = 0.03
 VOLATILITE_CRE = 0.20          # volatilite annuelle des forwards annuels (estimation CRE)
 JOURS_T1_T2 = 70               # du 22/09/2026 au 01/12/2026
 
-# EEX French Power Futures 2027, prix de reglement en EUR/MWh (fichier du prof)
-#            Base T1  Peak T1  Base T2  Peak T2      T1 = 22/09/2026  T2 = 01/12/2026
+# EEX French Power Futures 2027, prix de reglement en EUR/MWh (fichiers du prof)
+# T1 = 22/09/2026   T2 = 01/12/2026   T3 = 31/12/2026
+#            Base T1  Peak T1  Base T2  Peak T2  Base T3  Peak T3
 EEX = {
-    "Cal-27": (83.31, 95.59, 73.70, 83.74),
-    "Q1-27": (139.00, 171.94, 119.54, 146.15),
-    "Q2-27": (45.18, 36.50, 42.47, 35.04),
-    "Q3-27": (61.09, 51.62, 56.20, 48.52),
-    "Q4-27": (88.78, 123.72, 77.24, 106.40),
-    "Jan-27": (159.54, 202.58, 135.42, 169.95),
-    "Feb-27": (153.15, 201.51, 131.53, 171.07),
-    "Mar-27": (105.63, 118.25, 92.83, 102.75),
-    "Apr-27": (59.51, 43.02, 55.44, 40.88),
-    "May-27": (39.33, 26.13, 37.03, 25.09),
-    "Jun-27": (36.90, 39.89, 35.12, 38.70),
+    "Cal-27": (83.31, 95.59, 73.70, 83.74, 78.37, 90.31),
+    "Q1-27": (139.00, 171.94, 119.54, 146.15, 133.88, 166.61),
+    "Q2-27": (45.18, 36.50, 42.47, 35.04, 43.32, 35.39),
+    "Q3-27": (61.09, 51.62, 56.20, 48.52, 56.76, 49.01),
+    "Q4-27": (88.78, 123.72, 77.24, 106.40, 80.33, 111.72),
+    "Jan-27": (159.54, 202.58, 135.42, 169.95, 156.25, 199.83),
+    "Feb-27": (153.15, 201.51, 131.53, 171.07, 147.87, 196.07),
+    "Mar-27": (105.63, 118.25, 92.83, 102.75, 98.87, 110.66),
+    "Apr-27": (59.51, 43.02, 55.44, 40.88, 57.02, 41.53),
+    "May-27": (39.33, 26.13, 37.03, 25.09, 37.71, 25.24),
+    "Jun-27": (36.90, 39.89, 35.12, 38.70, 35.42, 38.93),
 }
+JALONS = {"T1": 0, "T2": 2, "T3": 4}
 FORWARD_CAL27_T1 = EEX["Cal-27"][0]
 FORWARD_CAL27_T2 = EEX["Cal-27"][2]
+FORWARD_CAL27_T3 = EEX["Cal-27"][4]
 
 
 def prix_eex(produit, nature="Base", jalon="T1"):
-    return EEX[produit][{"Base": 0, "Peak": 1}[nature] + {"T1": 0, "T2": 2}[jalon]]
+    return EEX[produit][{"Base": 0, "Peak": 1}[nature] + JALONS[jalon]]
 
 
 def forward_t2_anticipe(niveau, alpha, forward_t1=FORWARD_CAL27_T1):
