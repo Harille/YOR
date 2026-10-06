@@ -26,6 +26,7 @@ import pandas as pd
 from outils import calendrier
 from outils import couverture as cv
 from outils import marche
+from outils import position
 from outils.demande import SORTIES, construire_base
 
 JOUR_SPOT = "2027-01-01"          # vendredi ferie
@@ -158,6 +159,8 @@ def main():
     print(f"  marge de manoeuvre restante jusqu'a 100 % : {100 * (1 - ratio_t1):.1f} %"
           f" soit {v_ref_t2 - energie_t1:,.0f} MWh (le plan prevoyait {100 * (plan - 0.70):.0f} %)")
 
+    position.verifier(mix_t1, "T1")
+
     tab_mtm, mtm = mark_to_market(mix_t1, index)
     cv.afficher(tab_mtm, "MARK-TO-MARKET DE LA POSITION T1, AUX PRIX DU 01/12/2026")
     print(f"  total : {mtm:+,.2f} MEUR soit {1e6 * mtm / energie_t1:+.2f} EUR/MWh couvert")
@@ -208,6 +211,7 @@ def main():
         mix_final[cle] = mix_final.get(cle, 0.0) + mw
     if mixes[choix]:
         cv.afficher(cv.decrire_mix(mixes[choix], index, "T2"), "PRODUITS ACHETES AU T2")
+    position.verifier(mixes[choix], "T2")
 
     # ==========================================================================
     # T2 - LA DEMANDE NETTE QUI RESTE, HEURE PAR HEURE

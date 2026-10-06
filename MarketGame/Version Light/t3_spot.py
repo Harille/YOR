@@ -12,8 +12,9 @@ Ce que ca lit   : donnees/*.csv, les prix EEX du 31/12/2026 (table EEX), et la
 Ce que ca ecrit : sorties/t3_reequilibrage.csv,
                   sorties/t3_position_20270101.csv
 Duree           : ~2 s
-A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier), POSITION
-                  (ce qui est deja achete), HEURE_SPOT, PRIX_CLEARING
+A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier),
+                  HEURE_SPOT, PRIX_CLEARING. Ce qui est deja achete se
+                  change dans outils/position.py (ACHETE).
 Deux inconnues  : SOLAIRE_ANNUEL_MWH et PRIX_CLEARING valent None tant que le
                   prof n'a pas donne l'information.
 Dans le rapport : etape 15
@@ -25,8 +26,8 @@ import pandas as pd
 from outils import calendrier
 from outils import couverture as cv
 from outils import marche
-from outils.demande import (CLIENTS, SORTIES, PARAMS, calculer_puissances,
-                                coefficient_meteo, construire_base, fud, _totaliser)
+from outils import position
+from outils.demande import CLIENTS, SORTIES, calculer_puissances, construire_base, reviser
 
 JOUR = "2027-01-01"
 HEURE_SPOT = 14            # l'heure demandee par le prof : 14h-15h
@@ -41,13 +42,7 @@ SOLAIRE_ANNUEL_MWH = None  # inconnu : le prof ne fournit que le 1er janvier.
                            # Renseigner pour que l'objectif 1 raisonne en besoin NET.
 COUT_MARGINAL_SOLAIRE = 0.0
 
-POSITION = {               # ce qui est deja achete au 31/12 : un fait, pas une decision
-    ("Q1-27", "Base"): (49.58, "T1"),
-    ("Q2-27", "Base"): (37.91, "T1"),
-    ("Q3-27", "Base"): (36.47, "T1"),
-    ("Q4-27", "Base"): (47.65, "T1"),
-    ("Cal-27", "Base"): (14.42, "T2"),
-}
+POSITION = position.ACHETE   # ce qui est deja achete au 31/12 : voir outils/position.py
 
 PRIX_CLEARING = None       # prix spot 14h-15h, publie par le prof apres la session 5
 
@@ -55,7 +50,7 @@ PRIX_CLEARING = None       # prix spot 14h-15h, publie par le prof apres la sess
 def volumes(base, jalon):
     """Volume 2027 a temperature normale, par trimestre, pour un jalon commercial."""
     d = calculer_puissances(calendrier.projeter(base, 2027))
-    p = sum(d[f"P_{x}_kW"] / PARAMS[x]["nb_clients"] * CLIENTS[jalon][x] for x in PARAMS)
+    p = reviser(d, jalon)["P_totale_kW"]
     return (p.groupby(np.asarray(p.index.quarter)).sum() * 0.25 / 1000), d
 
 
@@ -116,14 +111,7 @@ def journee(base):
     j = cible[np.asarray(cible.index.date) == pd.Timestamp(JOUR).date()].copy()
     pas = len(j) // 24
     j["temperature_realisee_lissee_degc"] = np.repeat(T_PREVUE, pas)[:len(j)]
-    for profil, nb in CLIENTS["T3"].items():
-        j[f"CM_{profil}"] = coefficient_meteo(
-            j[f"grad_{profil}"], j["temperature_normale_lissee_degc"],
-            j["temperature_realisee_lissee_degc"])
-        base_kw = nb * fud(profil) * j[f"coef_{profil}"]
-        j[f"P_{profil}_kW"] = base_kw
-        j[f"P_dyn_{profil}_kW"] = base_kw * j[f"CM_{profil}"]
-    j = _totaliser(j)
+    j = calculer_puissances(j, "T3")      # meme formule qu'au T1 et au T2, effectifs du T3
 
     h = pd.DataFrame({"charge MW": j["P_dyn_totale_kW"].resample("h").mean() / 1000,
                       "charge normale MW": j["P_totale_kW"].resample("h").mean() / 1000})

@@ -45,6 +45,9 @@ STRATEGIES = {             # (part achetee a T1, part planifiee pour T2) - le re
     "B - peu couverte":         (0.40, 0.40),
     "C - totalement couverte":  (0.40, 0.60),
     "D - back loaded":          (0.40, 0.50),
+    "E - 80/10/10":             (0.80, 0.10),
+    "F - 80/15/5":              (0.80, 0.15),
+    "G - 90/5/5":               (0.90, 0.05),
 }
 
 MOIS_EEX = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6}

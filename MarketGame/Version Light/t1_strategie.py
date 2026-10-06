@@ -124,6 +124,12 @@ def main():
     else:
         print(f"  -> AUCUNE strategie ne tient le plancher de {cv.PLANCHER_RISQUE:.0f} EUR/MWh :"
               f" le portefeuille est structurellement trop cher a {cv.PRIX_VENTE:.0f} EUR/MWh.")
+        repli = strat["pire cas"].idxmax()
+        print(f"  -> regle de repli : le MEILLEUR PIRE CAS, soit {repli}"
+              f" (pire cas {strat.loc[repli, 'pire cas']:+.2f},"
+              f" esperance {strat.loc[repli, 'esperance']:.2f} EUR/MWh).")
+        print(f"     C'est cette strategie qui est reprise au T2"
+              f" (STRATEGIE_T1 en tete de t2_decision.py).")
 
     ref = strat["couv. prevue %"].idxmin()
     prot = pd.DataFrame({

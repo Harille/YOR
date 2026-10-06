@@ -120,10 +120,17 @@ def coefficient_meteo(gradient, t_normale, t_realisee, t_seuil=T_SEUIL):
     return pd.Series(cm, index=t_realisee.index)
 
 
-def calculer_puissances(df):
+def calculer_puissances(df, jalon=None):
+    """Puissance de chaque profil, en kW.
+
+    jalon=None  : portefeuille de reference (PARAMS), c'est-a-dire celui du T1.
+    jalon="T2" ou "T3" : les effectifs de CLIENTS a ce jalon.
+    Un seul endroit calcule CM et la puissance : t3_spot.py passe par ici aussi.
+    """
     out = df.copy()
     for profil in ("RES1", "PRO1"):
-        f, nb = fud(profil), PARAMS[profil]["nb_clients"]
+        f = fud(profil)
+        nb = PARAMS[profil]["nb_clients"] if jalon is None else CLIENTS[jalon][profil]
         coef = out[f"coef_{profil}"]
         out[f"CM_{profil}"] = coefficient_meteo(
             out[f"grad_{profil}"], out["temperature_normale_lissee_degc"],
