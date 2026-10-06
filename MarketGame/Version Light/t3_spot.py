@@ -1,12 +1,31 @@
-"""T3 (31/12/2026) : reequilibrage de la couverture et ordre day-ahead du 1er janvier 2027."""
+"""
+T3 — 31/12/2026 : ACTUALISER, REEQUILIBRER, ENVOYER LES ORDRES SPOT
+...............................................................................
+Le plan du cours, point par point :
+    1. actualiser les donnees
+    2. demande nette  =>  open positions
+    3. hedging (reequilibrage trimestriel aux prix du 31/12/2026)
+    4. envoyer les ordres SPOT pour le 1er janvier 2027
+
+Ce que ca lit   : donnees/*.csv, les prix EEX du 31/12/2026 (table EEX), et la
+                  prevision du 1er janvier donnee en tete de ce fichier
+Ce que ca ecrit : sorties/t3_reequilibrage.csv,
+                  sorties/t3_position_20270101.csv
+Duree           : ~2 s
+A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier), POSITION
+                  (ce qui est deja achete), HEURE_SPOT, PRIX_CLEARING
+Deux inconnues  : SOLAIRE_ANNUEL_MWH et PRIX_CLEARING valent None tant que le
+                  prof n'a pas donne l'information.
+Dans le rapport : etape 15
+"""
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import calendrier
-import comparaison_scenarios as cp
-import scenarios as sc
-from Modelisation_Conso import (CLIENTS, SORTIES, PARAMS, calculer_puissances,
+from outils import calendrier
+from outils import couverture as cv
+from outils import marche
+from outils.demande import (CLIENTS, SORTIES, PARAMS, calculer_puissances,
                                 coefficient_meteo, construire_base, fud, _totaliser)
 
 JOUR = "2027-01-01"
@@ -43,20 +62,20 @@ def volumes(base, jalon):
 def objectif_1(d, vq):
     """Reequilibrer la couverture aux prix du 31/12."""
     index = d["P_totale_kW"].resample("h").mean().index
-    heures = {(p, n): cp.heures_livrees(p, n, index) for (p, n) in POSITION}
+    heures = {(p, n): cv.heures_livrees(p, n, index) for (p, n) in POSITION}
 
     lignes, livre = [], {q: 0.0 for q in vq}
     for (produit, nature), (mw, jalon) in sorted(POSITION.items()):
         e = mw * heures[(produit, nature)]
-        achat, t3 = sc.prix_eex(produit, nature, jalon), sc.prix_eex(produit, nature, "T3")
+        achat, t3 = marche.prix_eex(produit, nature, jalon), marche.prix_eex(produit, nature, "T3")
         lignes.append({"produit": produit, "MW": mw, "achete au": jalon, "MWh": e,
                        "prix paye": achat, "prix T3": t3,
                        "MtM kEUR": e * (t3 - achat) / 1000})
-        fen = cp.fenetre(produit, nature, index).to_numpy()
+        fen = cv.fenetre(produit, nature, index).to_numpy()
         for q in vq:                              # part livree a l'interieur du trimestre q
             livre[q] += mw * float((fen & (np.asarray(index.quarter) == q)).sum())
     portefeuille = pd.DataFrame(lignes)
-    cp.afficher(portefeuille.round(2), "POSITION DETENUE, VALORISEE AU 31/12/2026")
+    cv.afficher(portefeuille.round(2), "POSITION DETENUE, VALORISEE AU 31/12/2026")
     e_tot, mtm = portefeuille["MWh"].sum(), portefeuille["MtM kEUR"].sum()
     print(f"  total {e_tot:,.0f} MWh | prix moyen paye "
           f"{(portefeuille['MWh'] * portefeuille['prix paye']).sum() / e_tot:.2f} EUR/MWh"
@@ -71,15 +90,15 @@ def objectif_1(d, vq):
     lignes = []
     for q in sorted(besoin):
         produit = f"Q{q}-27"
-        h = cp.heures_livrees(produit, "Base", index)
+        h = cv.heures_livrees(produit, "Base", index)
         ecart = besoin[q] - livre[q]
-        prix = sc.prix_eex(produit, "Base", "T3")
+        prix = marche.prix_eex(produit, "Base", "T3")
         lignes.append({"trimestre": produit, "besoin MWh": besoin[q], "couvert MWh": livre[q],
                        "ratio %": 100 * livre[q] / besoin[q], "ecart MWh": ecart,
                        "a traiter MW": ecart / h, "prix T3": prix,
                        "montant kEUR": ecart * prix / 1000})
     action = pd.DataFrame(lignes).set_index("trimestre")
-    cp.afficher(action.round(2), "OBJECTIF 1 - REEQUILIBRAGE PAR TRIMESTRE")
+    cv.afficher(action.round(2), "OBJECTIF 1 - REEQUILIBRAGE PAR TRIMESTRE")
     b_tot = sum(besoin.values())
     print(f"  besoin {b_tot:,.0f} MWh | couvert {e_tot:,.0f} MWh"
           f" -> ratio global {100 * e_tot / b_tot:.1f} %")
@@ -109,7 +128,7 @@ def journee(base):
     h = pd.DataFrame({"charge MW": j["P_dyn_totale_kW"].resample("h").mean() / 1000,
                       "charge normale MW": j["P_totale_kW"].resample("h").mean() / 1000})
     h["solaire MW"] = SOLAIRE
-    h["couverture MW"] = sum(mw * cp.fenetre(p, n, h.index)
+    h["couverture MW"] = sum(mw * cv.fenetre(p, n, h.index)
                              for (p, n), (mw, _) in POSITION.items())
     h["position MW"] = h["charge MW"] - h["solaire MW"] - h["couverture MW"]
     h["sens"] = np.where(h["position MW"] > 0, "SHORT (acheter)", "LONG (revendre)")
@@ -148,6 +167,10 @@ def ordre_spot(h, heure=HEURE_SPOT):
 
 
 def main():
+    # ==========================================================================
+    # T3 - POINT 1 : ACTUALISER LES DONNEES
+    # effectifs du 31/12, prix EEX du 31/12, prevision du 1er janvier
+    # ==========================================================================
     base = construire_base()
     vq, d = volumes(base, "T3")
     print(f"\n{'=' * 78}\nT3 - 31 DECEMBRE 2026\n{'=' * 78}")
@@ -156,12 +179,15 @@ def main():
         print(f"  volume 2027 au {jalon} : {v.sum():>9,.0f} MWh"
               f"   ({CLIENTS[jalon]['RES1']:,} RES1 + {CLIENTS[jalon]['PRO1']:,} PRO1)")
 
+    # ==========================================================================
+    # T3 - POINTS 2 ET 3 : DEMANDE NETTE => OPEN POSITIONS, PUIS HEDGING
+    # ==========================================================================
     action = objectif_1(d, vq.to_dict())
     j, h = journee(base)
 
     aff = h.copy()
     aff.index = [f"{x:%H:%M}" for x in aff.index]
-    cp.afficher(aff.round(2), f"POSITION OUVERTE DU {pd.Timestamp(JOUR):%d/%m/%Y}"
+    cv.afficher(aff.round(2), f"POSITION OUVERTE DU {pd.Timestamp(JOUR):%d/%m/%Y}"
                               f" - temperature prevue, solaire deduit")
     print(f"  temperature prevue {np.mean(T_PREVUE):+.2f} C contre"
           f" {j['temperature_normale_lissee_degc'].mean():.2f} C de normale")
@@ -171,6 +197,9 @@ def main():
     print(f"  a acheter {h['position MW'].clip(lower=0).sum():,.1f} MWh"
           f" | a revendre {-h['position MW'].clip(upper=0).sum():,.1f} MWh")
 
+    # ==========================================================================
+    # T3 - POINT 4 : ENVOYER LES ORDRES SPOT
+    # ==========================================================================
     ordre_spot(h)
     action.to_csv(SORTIES / "t3_reequilibrage.csv", sep=";", decimal=",")
     h.to_csv(SORTIES / "t3_position_20270101.csv", sep=";", decimal=",")

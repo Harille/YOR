@@ -1,3 +1,17 @@
+"""
+OUTIL — LE MARCHE : prix EEX, scenarios de prix, methode alpha
+...............................................................................
+Ce que ca fait  : la table des prix EEX aux trois jalons (Base et Peak, Cal,
+                  Q1-Q4, Jan-Jun), la construction d'un scenario de prix a
+                  partir d'une annee historique (Level x Shape), la pente
+                  prix-volume b, et le forward T2 anticipe par la methode alpha
+                  avec son controle de plausibilite (sigma CRE).
+Ce que ca lit   : donnees/historique/temperature_AAAA.csv et prix_AAAA.csv
+Ce que ca ecrit : sorties/scenario_2021_2027.csv  (quand on le lance seul)
+A changer ici   : EEX (les prix releves par le prof), ANNEE_HISTORIQUE,
+                  PRIME_DE_RISQUE, VOLATILITE_CRE
+Dans le rapport : etapes 8, 9 et 10
+"""
 import io
 import unicodedata
 
@@ -5,8 +19,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import calendrier
-from Modelisation_Conso import (ANNEE_CIBLE, SORTIES, entree, calculer_puissances,
+from outils import calendrier
+from outils.demande import (ANNEE_CIBLE, SORTIES, entree, calculer_puissances,
                                 construire_base, pas_horaire, reviser_t2)
 
 ANNEE_HISTORIQUE = 2021

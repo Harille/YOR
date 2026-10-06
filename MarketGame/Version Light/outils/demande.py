@@ -1,10 +1,25 @@
+"""
+OUTIL — LA DEMANDE : construire la courbe de charge 2027
+...............................................................................
+Ce que ca fait  : profil Enedis (FUD = Ps x Theta) -> thermosensibilite RTE
+                  (CM, seuil 15 degres) -> calendrier -> puissance demi-horaire,
+                  affinee au quart d'heure. Puis les volumes : annuel, mensuel,
+                  trimestriel, peak / off-peak.
+Ce que ca lit   : donnees/RES1_BASE.csv, PRO1_BASE.csv, gradients.csv,
+                  temperature_2025.csv
+Ce que ca ecrit : sorties/courbe_de_charge_2025.csv, _2027.csv, _2027_T2.csv
+                  (ecrits par main(), appele depuis t1_strategie.py)
+A changer ici   : CLIENTS (effectifs aux trois jalons), COEF_COL, T_SEUIL,
+                  AFFINER_AU_QUART_HEURE
+Dans le rapport : etapes 1 a 5
+"""
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-import calendrier
+from outils import calendrier
 
 ANNEE_CIBLE = 2027
 
@@ -22,7 +37,7 @@ COEF_COL = "COEFFICIENT_PREPARE"
 T_SEUIL = 15.0
 AFFINER_AU_QUART_HEURE = True
 
-DOSSIER = Path(__file__).parent
+DOSSIER = Path(__file__).resolve().parent.parent   # la racine du projet, pas outils/
 DONNEES = DOSSIER / "donnees"           # ce que fournit le prof : on ne l'ecrit jamais
 SORTIES = DOSSIER / "sorties"           # ce que le code produit : efface-le quand tu veux
 SORTIES.mkdir(exist_ok=True)

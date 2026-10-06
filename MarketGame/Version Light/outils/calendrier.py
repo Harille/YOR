@@ -1,3 +1,16 @@
+"""
+OUTIL — LE CALENDRIER : jours feries, types de jour, projection d'une annee
+...............................................................................
+Ce que ca fait  : donne a chaque horodate son type de jour (lundi..dimanche, plus
+                  un 7e type pour les feries), apparie chaque jour de l'annee
+                  cible avec un jour de MEME TYPE de l'annee source, et projette
+                  une courbe d'une annee sur une autre.
+                  Paques est calculee par l'algorithme de Meeus/Jones/Butcher.
+Ce que ca lit   : rien, c'est du calcul pur
+Ce que ca ecrit : rien, c'est une bibliotheque
+Qui s'en sert   : outils/demande.py, outils/marche.py, t3_spot.py
+Dans le rapport : etapes 6 et 7
+"""
 import datetime as dt
 import pandas as pd
 
