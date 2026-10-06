@@ -126,8 +126,20 @@ def main():
           f" ({marche.FORWARD_CAL27_T2 / marche.FORWARD_CAL27_T1 - 1:+.1%}), sigma CRE = {sigma:.2f}")
     print(f"  le prix observe est {'DANS' if dedans else 'HORS'} la fourchette anticipee"
           f" [{min(anticipes):.2f} ; {max(anticipes):.2f}]")
-    print(f"  alpha retenu {cv.ALPHA_T2:.2f} ; aucun alpha de [0 ; 1] n'atteint 73.70"
-          f" -> la baisse n'est pas d'origine meteo (gaz, CO2, nucleaire, demande).")
+    requis = {an: (marche.FORWARD_CAL27_T2 - marche.FORWARD_CAL27_T1)
+                  / (s["niveau"] - marche.FORWARD_CAL27_T1) for an, s in scen_t1.items()}
+    atteignables = {an: a for an, a in requis.items() if 0.0 <= a <= 1.0}
+    print(f"  alpha retenu {cv.ALPHA_T2:.2f} ; alpha requis pour atteindre"
+          f" {marche.FORWARD_CAL27_T2:.2f} :")
+    if atteignables:
+        print("     " + ", ".join(f"{an} -> {a:.2f}" for an, a in atteignables.items())
+              + "  (dans [0 ; 1], donc atteignable)")
+        print("     Sur les seules annees meteo, aucun alpha de [0 ; 1] n'y arrive : la")
+        print("     baisse ne s'explique que par un choc de fondamentaux (gaz, CO2,")
+        print("     nucleaire, demande), pas par la meteo.")
+    else:
+        print(f"     aucun scenario n'y arrive avec un alpha de [0 ; 1]"
+              f" -> la baisse n'est pas d'origine meteo.")
 
     # ------------------------------------------------- 4.2 probabilites revisees
     probas = probabilites_revisees(scen_t1, priors)

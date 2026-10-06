@@ -60,9 +60,13 @@ def main():
           f" d'ou le test de sensibilite a b ci-dessous.")
 
     if cv.CHOC_FONDAMENTAL:
-        nom = f"choc {cv.CHOC_FONDAMENTAL:+.0%}"
-        print(f"  scenario de choc : meteo {scenarios[nom]['origine']} + niveau"
-              f" {cv.CHOC_FONDAMENTAL:+.0%} hors meteo, probabilite {cv.PROBA_CHOC:.0%}")
+        for signe, sens in ((+1, "hausse"), (-1, "baisse")):
+            nom = cv.nom_du_choc(signe)
+            print(f"  choc a la {sens} : meteo {scenarios[nom]['origine']} + niveau"
+                  f" {signe * cv.CHOC_FONDAMENTAL:+.0%} hors meteo,"
+                  f" probabilite {cv.PROBA_CHOC:.0%}")
+        print(f"  les deux chocs sont symetriques : sans celui a la baisse, le manque a"
+              f" gagner de la couverture reste invisible.")
 
     reference = next(iter(scenarios.values()))["courbe"]
     volumes_q = (reference["charge_normale_MW"]

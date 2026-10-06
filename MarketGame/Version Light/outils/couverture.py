@@ -35,8 +35,10 @@ FORME = "trimestres"       # "cal" | "trimestres" | "trimestres+peak"
 # Indispensable : sans lui, le Level vaut toujours forward x (1 - prime), donc le spot
 # est espere moins cher que le forward et le modele conclut mecaniquement "ne jamais se
 # couvrir". +20 % = un ecart-type, c'est la volatilite annuelle estimee par la CRE.
-CHOC_FONDAMENTAL = 0.20    # 0.0 pour desactiver le scenario de choc
-PROBA_CHOC = 0.15          # probabilite du choc (queue haute a 1 sigma)
+# Les chocs vont par paire : un fondamental peut faire monter le prix comme le faire
+# baisser. N'en garder qu'un seul fausserait la lecture du risque dans les deux sens.
+CHOC_FONDAMENTAL = 0.20    # 0.0 pour desactiver les deux chocs
+PROBA_CHOC = 0.15          # probabilite de CHAQUE choc (hausse et baisse)
 
 STRATEGIES = {             # (part achetee a T1, part planifiee pour T2) - le reste au SPOT
     "Notre strategie 70/20/10": (0.70, 0.20),
@@ -135,8 +137,13 @@ def pente_mutualisee(scenarios):
     return marche.pente_prix_volume(paquet)
 
 
+def nom_du_choc(signe):
+    """Le nom d\'un scenario de choc : +1 pour la hausse, -1 pour la baisse."""
+    return f"choc {signe * CHOC_FONDAMENTAL:+.0%}"
+
+
 def construire_jeu(base, annees, forward=None, bavard=True):
-    """Les scenarios meteo, la pente mutualisee, le scenario de choc et les probabilites."""
+    """Les scenarios meteo, la pente mutualisee, les deux chocs et les probabilites."""
     forward = marche.FORWARD_CAL27_T1 if forward is None else forward
     brut = {}
     for an in annees:
@@ -147,13 +154,21 @@ def construire_jeu(base, annees, forward=None, bavard=True):
 
     scenarios = {an: reajuster(s, b, forward) for an, s in brut.items()}
     if CHOC_FONDAMENTAL:
+        # Deux chocs de niveau, symetriques. La hausse est portee par l'annee la plus
+        # froide (le pire cumul prix x volume), la baisse par la plus douce. Le niveau
+        # de prix bouge, le volume ne bouge pas : un choc de fondamentaux (gaz, CO2,
+        # parc nucleaire) n'est pas un evenement meteo.
         froid = min(brut, key=lambda a: brut[a]["temperature_moyenne"])
-        nom = f"choc {CHOC_FONDAMENTAL:+.0%}"
-        scenarios[nom] = reajuster(brut[froid], b, forward * (1 + CHOC_FONDAMENTAL))
-        scenarios[nom]["multiplicateur_forward"] = 1 + CHOC_FONDAMENTAL
-        scenarios[nom]["origine"] = froid
-        reste = (1 - PROBA_CHOC) / len(brut)
-        probabilites = {an: reste for an in brut} | {nom: PROBA_CHOC}
+        doux = max(brut, key=lambda a: brut[a]["temperature_moyenne"])
+        for signe, origine in ((+1, froid), (-1, doux)):
+            multiplicateur = 1 + signe * CHOC_FONDAMENTAL
+            nom = nom_du_choc(signe)
+            scenarios[nom] = reajuster(brut[origine], b, forward * multiplicateur)
+            scenarios[nom]["multiplicateur_forward"] = multiplicateur
+            scenarios[nom]["origine"] = origine
+        reste = (1 - 2 * PROBA_CHOC) / len(brut)
+        probabilites = ({an: reste for an in brut}
+                        | {nom_du_choc(+1): PROBA_CHOC, nom_du_choc(-1): PROBA_CHOC})
     else:
         probabilites = {an: 1 / len(brut) for an in brut}
     return scenarios, brut, b, probabilites
