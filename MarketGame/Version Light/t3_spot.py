@@ -9,14 +9,14 @@ Le plan du cours, point par point :
 
 Ce que ca lit   : donnees/*.csv, les prix EEX du 31/12/2026 (table EEX), et la
                   prevision du 1er janvier donnee en tete de ce fichier
-Ce que ca ecrit : sorties/t3_reequilibrage.csv,
-                  sorties/t3_position_20270101.csv
+Ce que ca ecrit : sorties/t3_reequilibrage.csv, sorties/t3_position_20270101.csv,
+                  sorties/t3_ordres_spot_20270101.csv (le formulaire EPEX)
 Duree           : ~2 s
 A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier),
                   HEURE_SPOT, PRIX_CLEARING. Ce qui est deja achete se
                   change dans outils/position.py (ACHETE).
-Deux inconnues  : SOLAIRE_ANNUEL_MWH et PRIX_CLEARING valent None tant que le
-                  prof n'a pas donne l'information.
+A savoir        : PRIX_CLEARING vaut None et le restera jusqu'a la seance :
+                  le prix sort de l'enchere, il n'est publie nulle part avant.
 Dans le rapport : etape 15
 """
 import matplotlib.pyplot as plt
@@ -38,9 +38,24 @@ T_PREVUE = [0.5, 0, -0.5, -1, -1.5, -2, -2, -1.5, -0.5, 1, 2.5, 3.5,
 SOLAIRE = [0, 0, 0, 0, 0, 0, 0, 0, 2, 8, 15, 21,
            24, 21, 14, 5, 0.5, 0, 0, 0, 0, 0, 0, 0]
 SOLAIRE_MWC = 80
-SOLAIRE_ANNUEL_MWH = None  # inconnu : le prof ne fournit que le 1er janvier.
-                           # Renseigner pour que l'objectif 1 raisonne en besoin NET.
+
+# Le Conseil (exercice SPOT, 1.1) confirme la centrale operationnelle "from 1 January
+# 2027" et demande de l'integrer "for 2027 and subsequent years" : elle produit donc
+# toute l'annee, pas seulement le 1er janvier. Le prof ne donne pas le productible
+# annuel -> c'est NOTRE hypothese, a assumer comme telle.
+PRODUCTIBLE_KWH_PAR_KWC = 1200             # France metropolitaine, ordre de grandeur usuel
+SOLAIRE_ANNUEL_MWH = SOLAIRE_MWC * PRODUCTIBLE_KWH_PAR_KWC    # 80 MWc x 1 200 = 96 000 MWh
+
+# Le solaire ne produit pas au rythme de la consommation : il faut le repartir par
+# saison, pas au prorata du besoin, sinon on lui prete de l'energie en hiver.
+PART_SOLAIRE_TRIMESTRE = {1: 0.15, 2: 0.33, 3: 0.34, 4: 0.18}
+
 COUT_MARGINAL_SOLAIRE = 0.0
+
+# Conventions du formulaire EPEX (exercice SPOT, point 2). Elles ne sont PAS
+# interchangeables : une limite a +4 000 sur une VENTE signifie qu'on ne vend jamais.
+PRIX_ACHAT_ILLIMITE = 4000.0     # achat price-independent
+PRIX_VENTE_ILLIMITE = -600.0     # vente price-independent
 
 POSITION = position.ACHETE   # ce qui est deja achete au 31/12 : voir outils/position.py
 
@@ -94,9 +109,16 @@ def objectif_1(d, vq):
                        "montant kEUR": ecart * prix / 1000})
     action = pd.DataFrame(lignes).set_index("trimestre")
     cv.afficher(action.round(2), "OBJECTIF 1 - REEQUILIBRAGE PAR TRIMESTRE")
-    b_tot = sum(besoin.values())
+    b_tot, brut = sum(besoin.values()), sum(vq.values())
     print(f"  besoin {b_tot:,.0f} MWh | couvert {e_tot:,.0f} MWh"
           f" -> ratio global {100 * e_tot / b_tot:.1f} %")
+    if SOLAIRE_ANNUEL_MWH:
+        print(f"  sans deduire le solaire, le besoin serait de {brut:,.0f} MWh"
+              f" et le ratio de {100 * e_tot / brut:.1f} % :")
+        print("  c'est la deduction du solaire qui fait passer de sous-couvert a sur-couvert.")
+        print("  Reserve : le solaire produit aux heures creuses d'ete, son energie ne vaut")
+        print("  donc pas le prix moyen du trimestre. Deduire MWh pour MWh est une")
+        print("  approximation genereuse ; un taux de captation l'affinerait.")
     for _, r in action.iterrows():
         sens = "ACHETER" if r["ecart MWh"] > 0 else "VENDRE "
         print(f"  {sens} {abs(r['a traiter MW']):5.2f} MW de {r.name} Base"
@@ -124,34 +146,80 @@ def journee(base):
 
 
 def ordre_spot(h, heure=HEURE_SPOT):
-    """Courbe d'ordre pour une heure : le solaire est offert au marche, le reste est subi."""
+    """Les 24 ordres du formulaire EPEX : un volume et un prix limite par heure.
+
+    Convention du formulaire : volume positif = achat, negatif = vente.
+    Le prix limite n'est pas un prix qu'on propose, c'est le maximum qu'on accepte
+    de payer (ou le minimum qu'on accepte de recevoir). Le prix de clearing sort de
+    l'enchere : il ne se decide pas ici.
+    """
+    lignes = []
+    for i, (_, r) in enumerate(h.iterrows()):
+        volume = r["position MW"]                 # une heure : 1 MW = 1 MWh
+        if volume > 0:
+            prix, motif = PRIX_ACHAT_ILLIMITE, "achat subi : l'imbalance coute plus cher"
+        else:
+            # Un surplus de forward est deja paye et sera livre : il faut s'en defaire.
+            # Un surplus de solaire, lui, se coupe pour rien -> il porte son cout marginal.
+            solaire_vendable = min(r["solaire MW"], -volume)
+            if solaire_vendable > 0 and solaire_vendable >= -volume - 1e-9:
+                prix, motif = COUT_MARGINAL_SOLAIRE, "surplus solaire : coupable sans cout"
+            else:
+                prix, motif = PRIX_VENTE_ILLIMITE, "surplus de forward : deja paye, a ecouler"
+        lignes.append({"heure": f"{i:02d}:00-{i + 1:02d}:00",
+                       "charge MW": r["charge MW"], "couverture MW": r["couverture MW"],
+                       "solaire MW": r["solaire MW"],
+                       "volume MWh": round(float(volume), 2),
+                       "prix limite EUR/MWh": prix,
+                       "sens": "ACHAT" if volume > 0 else "VENTE", "motif": motif})
+    ordres = pd.DataFrame(lignes).set_index("heure")
+
+    cv.afficher(ordres.drop(columns=["motif"]).round(2),
+                f"OBJECTIF 2 - LES 24 ORDRES DU {pd.Timestamp(JOUR):%d/%m/%Y}")
+    achats = ordres[ordres["volume MWh"] > 0]
+    ventes = ordres[ordres["volume MWh"] < 0]
+    print(f"  {len(achats)} heures d'achat pour {achats['volume MWh'].sum():,.1f} MWh,"
+          f" {len(ventes)} heures de vente pour {-ventes['volume MWh'].sum():,.1f} MWh")
+    print(f"  prix limite {PRIX_ACHAT_ILLIMITE:,.0f} sur les achats,"
+          f" {PRIX_VENTE_ILLIMITE:,.0f} sur les ventes : price-independent des deux cotes."
+          f" Les deux ne sont pas interchangeables.")
+
+    peak = sum(1 for (_, nature) in POSITION if nature == "Peak")
+    fin = ("ATTENTION : le peak EEX inclut les jours feries, il livre donc le 1er janvier"
+           if peak else "aucun -> le piege du vendredi ferie ne nous concerne pas")
+    print(f"  produits Peak detenus : {peak} -> {fin}")
+
+    print("")
+    print("  Les deux lignes de justification a recopier sur le formulaire :")
+    print("    Tous les achats sont price-independent : la consommation a lieu quoi qu'il")
+    print("    arrive, et l'energie non achetee se regle au prix de desequilibre, en regle")
+    print("    generale superieur au spot. Les ventes ecoulent un surplus de forward deja")
+    print(f"    paye ; le solaire porterait, lui, une limite a {COUT_MARGINAL_SOLAIRE:.0f}"
+          f" EUR/MWh - on le coupe")
+    print("    plutot que de payer pour l'injecter - mais il ne produit a aucune heure longue.")
+
     r = h.iloc[heure]
-    besoin = r["charge MW"] - r["couverture MW"]       # ce qui manque hors production propre
-    print(f"\n{'=' * 78}\nOBJECTIF 2 - ORDRE DAY-AHEAD {heure:02d}h00-{heure + 1:02d}h00"
-          f"\n{'=' * 78}")
-    print(f"  charge prevue      {r['charge MW']:7.2f} MW")
-    print(f"  couverture livree  {r['couverture MW']:7.2f} MW")
-    print(f"  production solaire {r['solaire MW']:7.2f} MW")
-    print(f"  position ouverte   {r['position MW']:+7.2f} MW  ({r['sens']})")
-    print("\n  Courbe d'ordre (le solaire se dispatche contre le prix, pas contre les clients)")
-    print(f"    prix < {COUT_MARGINAL_SOLAIRE:.0f} EUR/MWh : on efface le solaire"
-          f" -> ACHETER {besoin:6.2f} MWh")
-    print(f"    prix >= {COUT_MARGINAL_SOLAIRE:.0f} EUR/MWh : le solaire est vendu"
-          f" -> ACHETER {r['position MW']:6.2f} MWh")
-    print(f"  Le volume achete est subi : ordre sans limite de prix (price-independent).")
-    print(f"  Le solaire porte une limite a {COUT_MARGINAL_SOLAIRE:.0f} EUR/MWh,"
-          f" son cout marginal.")
+    o = ordres.iloc[heure]
+    print("")
+    print(f"  Focus sur l'heure demandee, {heure:02d}h00-{heure + 1:02d}h00 :")
+    print(f"    charge {r['charge MW']:.2f} - solaire {r['solaire MW']:.2f}"
+          f" - couverture {r['couverture MW']:.2f} = {r['position MW']:+.2f} MW")
+    print(f"    ordre : {o['sens']} {abs(o['volume MWh']):.2f} MWh"
+          f" a {o['prix limite EUR/MWh']:,.0f} EUR/MWh")
 
     if PRIX_CLEARING is None:
-        print("\n  PRIX_CLEARING non renseigne : hedge success calculable apres publication.")
-        return None
-    cout = r["position MW"] * PRIX_CLEARING
-    cout_nu = (r["charge MW"] - r["solaire MW"]) * PRIX_CLEARING
-    print(f"\n  prix de clearing   {PRIX_CLEARING:7.2f} EUR/MWh")
-    print(f"  cout de l'heure    {cout:+8.0f} EUR  (sans couverture : {cout_nu:+,.0f} EUR)")
-    print(f"  part du besoin couverte par les forwards :"
-          f" {100 * r['couverture MW'] / (r['charge MW'] - r['solaire MW']):.1f} %")
-    return cout
+        print("")
+        print("  PRIX_CLEARING non renseigne : le prix sort de l'enchere en seance.")
+        print("  Le hedge success se calcule une fois le clearing connu.")
+    else:
+        cout = float((ordres["volume MWh"] * PRIX_CLEARING).sum())
+        cout_nu = float(((h["charge MW"] - h["solaire MW"]) * PRIX_CLEARING).sum())
+        print("")
+        print(f"  prix de clearing   {PRIX_CLEARING:7.2f} EUR/MWh")
+        print(f"  cout de la journee {cout:+12,.0f} EUR"
+              f"  (sans aucune couverture : {cout_nu:+,.0f} EUR)")
+        print(f"  hedge success      {cout_nu - cout:+12,.0f} EUR")
+    return ordres
 
 
 def main():
@@ -188,10 +256,12 @@ def main():
     # ==========================================================================
     # T3 - POINT 4 : ENVOYER LES ORDRES SPOT
     # ==========================================================================
-    ordre_spot(h)
+    ordres = ordre_spot(h)
     action.to_csv(SORTIES / "t3_reequilibrage.csv", sep=";", decimal=",")
     h.to_csv(SORTIES / "t3_position_20270101.csv", sep=";", decimal=",")
-    print("\n-> Exports dans sorties/ : t3_reequilibrage.csv, t3_position_20270101.csv")
+    ordres.to_csv(SORTIES / "t3_ordres_spot_20270101.csv", sep=";", decimal=",")
+    print("\n-> Exports dans sorties/ : t3_reequilibrage.csv, t3_position_20270101.csv,"
+          " t3_ordres_spot_20270101.csv")
     return action, h
 
 
