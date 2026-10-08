@@ -127,7 +127,22 @@ def objectif_1(d, vq):
     return action
 
 
-def journee(base):
+def position_apres_reequilibrage(action):
+    """La couverture reellement livree en 2027, APRES les ordres passes au T3.
+
+    Le reequilibrage de l'objectif 1 n'est pas un calcul d'affichage : s'il est
+    execute, il change ce qui sera livre le 1er janvier. L'oublier revient a
+    dimensionner l'ordre day-ahead sur une couverture qu'on vient de vendre.
+    """
+    apres = dict(POSITION)
+    for trimestre, r in action.iterrows():
+        cle = (trimestre, "Base")
+        mw, jalon = apres.get(cle, (0.0, "T3"))
+        apres[cle] = (mw + r["a traiter MW"], jalon)
+    return apres
+
+
+def journee(base, couverture=None):
     """Charge du 1er janvier avec la temperature prevue et les effectifs du T3."""
     cible = calendrier.projeter(base, 2027)
     j = cible[np.asarray(cible.index.date) == pd.Timestamp(JOUR).date()].copy()
@@ -138,8 +153,9 @@ def journee(base):
     h = pd.DataFrame({"charge MW": j["P_dyn_totale_kW"].resample("h").mean() / 1000,
                       "charge normale MW": j["P_totale_kW"].resample("h").mean() / 1000})
     h["solaire MW"] = SOLAIRE
+    detenu = POSITION if couverture is None else couverture
     h["couverture MW"] = sum(mw * cv.fenetre(p, n, h.index)
-                             for (p, n), (mw, _) in POSITION.items())
+                             for (p, n), (mw, _) in detenu.items())
     h["position MW"] = h["charge MW"] - h["solaire MW"] - h["couverture MW"]
     h["sens"] = np.where(h["position MW"] > 0, "SHORT (acheter)", "LONG (revendre)")
     return j, h
@@ -239,7 +255,14 @@ def main():
     # T3 - POINTS 2 ET 3 : DEMANDE NETTE => OPEN POSITIONS, PUIS HEDGING
     # ==========================================================================
     action = objectif_1(d, vq.to_dict())
-    j, h = journee(base)
+    apres = position_apres_reequilibrage(action)
+    j, h = journee(base, apres)
+    j_avant, h_avant = journee(base)            # pour montrer ce que le T3 a change
+    print(f"\n  couverture livree le {pd.Timestamp(JOUR):%d/%m} :"
+          f" {h_avant['couverture MW'].iloc[0]:.2f} MW avant le reequilibrage,"
+          f" {h['couverture MW'].iloc[0]:.2f} MW apres.")
+    print("  L'ordre day-ahead est dimensionne sur la couverture APRES :"
+          " vendre du Q1 au T3, c'est en avoir moins le 1er janvier.")
 
     aff = h.copy()
     aff.index = [f"{x:%H:%M}" for x in aff.index]
