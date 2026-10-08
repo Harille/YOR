@@ -1,0 +1,36 @@
+LES FICHIERS D'ORIGINE DU PROF (Excel, PDF)
+===========================================
+
+Le code ne lit AUCUN de ces fichiers. Il ne lit que les CSV du dossier
+donnees/ (RES1_BASE, PRO1_BASE, gradients, temperature_2025, historique/).
+
+Ces fichiers-ci sont les SOURCES : les chiffres qu'ils contiennent ont ete
+recopies a la main dans des constantes du code. D'ou ce tableau, qui dit
+quelle constante vient de quel document. C'est lui qu'il faut ouvrir quand
+le prof publie une mise a jour.
+
+  Constante du code                     Fichier d'origine
+  ----------------------------------    --------------------------------------
+  EEX              outils/marche.py     les releves de prix EEX aux trois
+                                        jalons (22/09, 01/12, 31/12)
+  CLIENTS["T2"]    outils/demande.py    la prevision commerciale du 01/12/2026
+  CLIENTS["T3"]    outils/demande.py    la prevision commerciale du 31/12/2026
+  T_PREVUE         t3_spot.py           26_EM_5_Data_forecast_for_1st_January
+  SOLAIRE          t3_spot.py           _2027_T3_261231.xlsx
+  SOLAIRE_MWC      t3_spot.py
+  PARAMS           outils/demande.py    guidelines 2.2 (Ps et Theta par profil)
+  PRIX_VENTE       outils/couverture.py guidelines 2.2 (95 EUR/MWh)
+  MARGE_CIBLE      outils/couverture.py guidelines 2.2 (10 EUR/MWh)
+  PLANCHER_RISQUE  outils/couverture.py guidelines 2.2 (5 EUR/MWh)
+  PRIME_DE_RISQUE  outils/marche.py     guidelines 3.3 (3 %)
+  ACHETE           outils/position.py   les ordres reellement passes au T1
+                                        et au T2
+
+Deux erreurs reperees dans les fichiers du prof, a ne pas reprendre
+aveuglement :
+  - feuille T2 : le "Total -3 %" est une valeur ecrite en dur ; la vraie
+    variation calculee a partir des deux profils est -5,96 %.
+  - feuille T3 : D5 = B5+C5*E5 alors que D6 = B6+B6*E6. Les deux formules ne
+    sont pas coherentes entre elles ; avec celle de la ligne 6, RES1 donnerait
+    191 000 au lieu des 191 531 affiches. C'est 191 531 qui est repris dans
+    CLIENTS["T3"].

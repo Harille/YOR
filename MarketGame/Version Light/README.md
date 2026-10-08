@@ -73,6 +73,14 @@ historique/prix_2021.csv          ... jusqu'a _2024.csv, day-ahead ENTSO-E
 Si ces fichiers sont restes a la racine (ancienne disposition), le code les y
 trouve quand meme : `donnees/` est essaye en premier, la racine ensuite.
 
+### Et les Excel et les PDF du prof ?
+
+Ils vont dans `donnees/sources/`. **Le code ne les lit jamais** : leurs chiffres
+ont ete recopies a la main dans des constantes (la table `EEX`, `CLIENTS`,
+`T_PREVUE`, `SOLAIRE`...). `donnees/sources/LISEZMOI.txt` dit quelle constante
+vient de quel document — c'est ce fichier qu'on ouvre quand le prof publie une
+mise a jour, pour savoir quoi changer et ou.
+
 ## Ou changer quoi
 
 | Quoi | Ou |
