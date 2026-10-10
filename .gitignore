@@ -1,0 +1,6 @@
+# Bytecode Python : regenere a chaque execution, ne se versionne pas
+__pycache__/
+*.py[cod]
+
+# Sorties de calcul : regenerees par lancer.py (les figures PNG, elles, sont suivies)
+MarketGame/Version Light/sorties/*.csv
