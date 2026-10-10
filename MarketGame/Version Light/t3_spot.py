@@ -9,7 +9,8 @@ Le plan du cours, point par point :
 
 Ce que ca lit   : donnees/*.csv, les prix EEX du 31/12/2026 (table EEX), et la
                   prevision du 1er janvier donnee en tete de ce fichier
-Ce que ca ecrit : sorties/t3_reequilibrage.csv, sorties/t3_position_20270101.csv,
+Ce que ca ecrit : sorties/t3_reequilibrage.csv, sorties/t3_journee_par_scenario.csv,
+                  sorties/t3_position_20270101.csv,
                   sorties/t3_ordres_spot_20270101.csv (le formulaire EPEX)
 Duree           : ~2 s
 A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier),
@@ -161,6 +162,40 @@ def journee(base, couverture=None):
     return j, h
 
 
+def journee_par_scenario(base):
+    """La charge du 1er janvier sous chaque scenario (guidelines 5.2).
+
+    Le prof demande la courbe du jour "at normal temperature and under each of
+    your scenarios". Chaque scenario rejoue la temperature REELLE de son annee
+    historique sur le calendrier 2027 : on reprend exactement la chaine du T1,
+    on ne garde que le 1er janvier. La colonne "T prevue" est celle du T3.
+    """
+    cible = calendrier.projeter(base, 2027)
+    jour = pd.Timestamp(JOUR).date()
+
+    def charge(df):
+        d = df[np.asarray(df.index.date) == jour].copy()
+        return calculer_puissances(d, "T3")["P_dyn_totale_kW"].resample("h").mean() / 1000
+
+    colonnes = {"T normale": charge(cible)}
+    for an in cv.ANNEES:
+        try:
+            temp = marche.charger_temperature_historique(
+                marche._fichier("temperature", an))["t_realisee"]
+        except FileNotFoundError:
+            continue
+        colonnes[f"scenario {an}"] = charge(marche.injecter_temperature(cible, temp))
+
+    prevue = cible[np.asarray(cible.index.date) == jour].copy()
+    prevue["temperature_realisee_lissee_degc"] = np.repeat(
+        T_PREVUE, len(prevue) // 24)[:len(prevue)]
+    colonnes["T prevue (T3)"] = charge(prevue)
+
+    out = pd.DataFrame(colonnes)
+    out.index = [f"{x:%H:%M}" for x in out.index]
+    return out
+
+
 def ordre_spot(h, heure=HEURE_SPOT):
     """Les 24 ordres du formulaire EPEX : un volume et un prix limite par heure.
 
@@ -280,16 +315,26 @@ def main():
     # T3 - POINT 4 : ENVOYER LES ORDRES SPOT
     # ==========================================================================
     ordres = ordre_spot(h)
+
+    # Guidelines 5.2 : la courbe du jour sous chaque scenario, pas seulement
+    # a temperature normale et a temperature prevue.
+    scen = journee_par_scenario(base)
+    cv.afficher(scen.round(2), f"CHARGE DU {pd.Timestamp(JOUR):%d/%m/%Y} PAR SCENARIO (MW)")
+    print("  total journalier (MWh) : "
+          + " | ".join(f"{c} {scen[c].sum():,.0f}" for c in scen.columns))
+
     action.to_csv(SORTIES / "t3_reequilibrage.csv", sep=";", decimal=",")
+    scen.to_csv(SORTIES / "t3_journee_par_scenario.csv", sep=";", decimal=",")
     h.to_csv(SORTIES / "t3_position_20270101.csv", sep=";", decimal=",")
     ordres.to_csv(SORTIES / "t3_ordres_spot_20270101.csv", sep=";", decimal=",")
-    print("\n-> Exports dans sorties/ : t3_reequilibrage.csv, t3_position_20270101.csv,"
-          " t3_ordres_spot_20270101.csv")
-    return action, h
+    print("\n-> Exports dans sorties/ : t3_reequilibrage.csv, t3_journee_par_scenario.csv,"
+          " t3_position_20270101.csv, t3_ordres_spot_20270101.csv")
+    return action, h, scen
 
 
-def tracer(h):
-    fig, axes = plt.subplots(2, 1, figsize=(13, 9))
+def tracer(h, scen=None):
+    n = 2 if scen is None else 3
+    fig, axes = plt.subplots(n, 1, figsize=(13, 4.5 * n))
     x = range(len(h))
     axes[0].plot(x, h["charge MW"], lw=2, color="tab:green", label="charge (T prevue)")
     axes[0].plot(x, h["charge normale MW"], lw=1, ls="--", color="grey", label="charge (T normale)")
@@ -305,6 +350,15 @@ def tracer(h):
     axes[1].set_ylabel("MW"); axes[1].set_xlabel("heure")
     axes[1].set_title("Position ouverte : rouge = acheter, bleu = revendre"
                       f" (en jaune, l'heure {HEURE_SPOT:02d}h-{HEURE_SPOT + 1:02d}h)")
+    if scen is not None:
+        for col in scen.columns:
+            style = dict(lw=2.6, color="black") if col == "T prevue (T3)" else {}
+            if col == "T normale":
+                style = dict(lw=1.4, ls="--", color="grey")
+            axes[2].plot(x, scen[col].to_numpy(), label=col, **style)
+        axes[2].set_ylabel("MW"); axes[2].legend(fontsize=8)
+        axes[2].set_title(f"{JOUR} - charge sous chaque scenario (guidelines 5.2)")
+
     for ax in axes:
         ax.set_xticks(list(x)); ax.set_xticklabels([f"{i:02d}" for i in x], fontsize=7)
         ax.grid(alpha=0.3)
@@ -312,5 +366,5 @@ def tracer(h):
 
 
 if __name__ == "__main__":
-    tableau, position = main()
-    tracer(position)
+    tableau, position, scenarios = main()
+    tracer(position, scenarios)
