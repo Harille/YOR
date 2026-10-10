@@ -147,8 +147,14 @@ def main():
     best = strat["pire cas"].idxmax()
     print(f"  meilleure protection possible : {best}"
           f" (pire cas {strat.loc[best, 'pire cas']:.2f} EUR/MWh)")
-    print("  plancher du Conseil :")
-    for p in sorted({-2.5, 0.0, 2.5, 5.0, cv.PLANCHER_RISQUE, 7.5, 10.0}):
+    print("  profils de risque du cours (EM_4 p.25) :")
+    for nom, p in cv.PROFILS_RISQUE.items():
+        c = cv.choisir(strat, p)
+        impose = "  <- impose par les guidelines" if p == cv.PLANCHER_RISQUE else ""
+        print(f"    {nom:<26} plancher {p:>5.1f} -> "
+              f"{c or 'aucune strategie admissible'}{impose}")
+    print("  autres planchers, pour situer le basculement :")
+    for p in sorted({-2.5, 2.5, 7.5, 10.0}):
         c = cv.choisir(strat, p)
         print(f"    {p:>5.1f} EUR/MWh -> {c or 'aucune strategie admissible'}")
     print("  pente b :")

@@ -28,6 +28,15 @@ MOIS_HIVER = [1, 2, 3, 11, 12]
 PRIX_VENTE = 95.0          # EUR/MWh, impose par le Conseil
 MARGE_CIBLE = 10.0         # EUR/MWh
 PLANCHER_RISQUE = 5.0      # EUR/MWh, pire cas minimum
+
+# Les trois profils de risque du cours (EM_4 p.25). Les guidelines imposent le
+# profil Prudent (plancher = MARGE_CIBLE / 2 = 5), mais les deux autres servent
+# a montrer ce qui bascule quand le Conseil accepte plus de risque.
+PROFILS_RISQUE = {
+    "Prudent  (WCM >= cible/2)": MARGE_CIBLE / 2,
+    "Balanced (WCM >= 0)": 0.0,
+    "Risky    (WCM >= -5)": -5.0,
+}
 ALPHA_T2 = 0.50            # part du scenario deja dans les prix au 01/12/2026
 FORME = "trimestres"       # "cal" | "trimestres" | "trimestres+peak"
 
