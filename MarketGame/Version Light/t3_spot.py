@@ -67,7 +67,9 @@ PRIX_CLEARING = None       # prix spot 14h-15h, publie par le prof apres la sess
 def volumes(base, jalon):
     """Volume 2027 a temperature normale, par trimestre, pour un jalon commercial."""
     d = calculer_puissances(calendrier.projeter(base, 2027))
-    p = reviser(d, jalon)["P_totale_kW"]
+    p = reviser(d, jalon)["P_totale_kW"]      # effectifs commerciaux de CE jalon
+    # Somme des puissances x duree du pas = energie. pas_horaire vaut 0,25 au
+    # quart d'heure, 0,5 a la demi-heure : on ne le code jamais en dur.
     return (p.groupby(np.asarray(p.index.quarter)).sum() * pas_horaire(d) / 1000), d
 
 
@@ -76,9 +78,14 @@ def objectif_1(d, vq):
     index = d["P_totale_kW"].resample("h").mean().index
     heures = {(p, n): cv.heures_livrees(p, n, index) for (p, n) in POSITION}
 
+    # livre[q] = combien de MWh chaque trimestre recoit reellement. Un Cal-27
+    # arrose les quatre trimestres, un Q2-27 un seul : d'ou le decoupage par
+    # fenetre de livraison plus bas, au lieu d'un simple total annuel.
     lignes, livre = [], {q: 0.0 for q in vq}
     for (produit, nature), (mw, jalon) in sorted(POSITION.items()):
         e = mw * heures[(produit, nature)]
+        # Prix paye au jalon ou l'achat a eu lieu, contre prix du 31/12 : l'ecart
+        # est le mark-to-market. Le jalon vient du journal, jamais d'un calcul.
         achat, t3 = marche.prix_eex(produit, nature, jalon), marche.prix_eex(produit, nature, "T3")
         lignes.append({"produit": produit, "MW": mw, "achete au": jalon, "MWh": e,
                        "prix paye": achat, "prix T3": t3,
@@ -109,6 +116,9 @@ def objectif_1(d, vq):
     for q in sorted(besoin):
         produit = f"Q{q}-27"
         h = cv.heures_livrees(produit, "Base", index)
+        # Positif = il manque de l'energie sur ce trimestre, on achete. Negatif =
+        # on en a trop, on vend. Diviser par les heures du trimestre redonne des
+        # MW, la seule unite dans laquelle un produit forward se traite.
         ecart = besoin[q] - livre[q]
         prix = marche.prix_eex(produit, "Base", "T3")
         lignes.append({"trimestre": produit, "besoin MWh": besoin[q], "couvert MWh": livre[q],
@@ -146,6 +156,9 @@ def position_apres_reequilibrage(action):
     for trimestre, r in action.iterrows():
         cle = (trimestre, "Base")
         mw, jalon = apres.get(cle, (0.0, "T3"))
+        # "a traiter" est signe : negatif quand on vend, donc l'addition
+        # retranche. Le jalon d'origine est conserve, c'est lui qui donne le prix
+        # paye - seule la quantite detenue change.
         apres[cle] = (mw + r["a traiter MW"], jalon)
     return apres
 
@@ -154,7 +167,9 @@ def journee(base, couverture=None):
     """Charge du 1er janvier avec la temperature prevue et les effectifs du T3."""
     cible = calendrier.projeter(base, 2027)
     j = cible[np.asarray(cible.index.date) == pd.Timestamp(JOUR).date()].copy()
-    pas = len(j) // 24
+    pas = len(j) // 24                     # 4 au quart d'heure, 2 a la demi-heure
+    # T_PREVUE donne 24 valeurs horaires ; on les repete sur chaque pas de temps
+    # de l'heure. C'est la prevision meteo du 31/12 pour le lendemain.
     j["temperature_realisee_lissee_degc"] = np.repeat(T_PREVUE, pas)[:len(j)]
     j = calculer_puissances(j, "T3")      # meme formule qu'au T1 et au T2, effectifs du T3
 
@@ -164,6 +179,8 @@ def journee(base, couverture=None):
     detenu = POSITION if couverture is None else couverture
     h["couverture MW"] = sum(mw * cv.fenetre(p, n, h.index)
                              for (p, n), (mw, _) in detenu.items())
+    # LA formule du T3 : ce qu'il reste a traiter au spot, une fois retire ce
+    # qu'on produit soi-meme et ce que les forwards livrent.
     h["position MW"] = h["charge MW"] - h["solaire MW"] - h["couverture MW"]
     h["sens"] = np.where(h["position MW"] > 0, "SHORT (acheter)", "LONG (revendre)")
     return j, h
@@ -234,7 +251,7 @@ def ordre_spot(h, heure=HEURE_SPOT):
 
     cv.afficher(ordres.drop(columns=["motif"]).round(2),
                 f"OBJECTIF 2 - LES 24 ORDRES DU {pd.Timestamp(JOUR):%d/%m/%Y}")
-    achats = ordres[ordres["volume MWh"] > 0]
+    achats = ordres[ordres["volume MWh"] > 0]      # convention EPEX : + achat, - vente
     ventes = ordres[ordres["volume MWh"] < 0]
     print(f"  {len(achats)} heures d'achat pour {achats['volume MWh'].sum():,.1f} MWh,"
           f" {len(ventes)} heures de vente pour {-ventes['volume MWh'].sum():,.1f} MWh")
@@ -242,6 +259,9 @@ def ordre_spot(h, heure=HEURE_SPOT):
           f" {PRIX_VENTE_ILLIMITE:,.0f} sur les ventes : price-independent des deux cotes."
           f" Les deux ne sont pas interchangeables.")
 
+    # Le piege du 1er janvier : c'est un vendredi FERIE, et le Peak EEX livre
+    # quand meme les jours feries. Qui detient du Peak recoit de la puissance
+    # 8h-20h un jour ou la consommation est creuse.
     peak = sum(1 for (_, nature) in POSITION if nature == "Peak")
     fin = ("ATTENTION : le peak EEX inclut les jours feries, il livre donc le 1er janvier"
            if peak else "aucun -> le piege du vendredi ferie ne nous concerne pas")
@@ -265,6 +285,8 @@ def ordre_spot(h, heure=HEURE_SPOT):
     print(f"    ordre : {o['sens']} {abs(o['volume MWh']):.2f} MWh"
           f" a {o['prix limite EUR/MWh']:,.0f} EUR/MWh")
 
+    # Tant que le prof n'a pas publie le prix de clearing, aucun hedge success
+    # n'est calculable : il se forme pendant l'enchere, pas avant.
     if PRIX_CLEARING is None:
         print("")
         print("  PRIX_CLEARING non renseigne : le prix sort de l'enchere en seance.")
@@ -297,6 +319,9 @@ def main():
     # T3 - POINTS 2 ET 3 : DEMANDE NETTE => OPEN POSITIONS, PUIS HEDGING
     # ==========================================================================
     action = objectif_1(d, vq.to_dict())
+    # L'ordre des deux lignes est critique : le day-ahead doit etre dimensionne
+    # sur la couverture d'APRES le reequilibrage. Vendre du Q1 au T3, c'est en
+    # avoir moins le 1er janvier - donc davantage a acheter au spot.
     apres = position_apres_reequilibrage(action)
     j, h = journee(base, apres)
     j_avant, h_avant = journee(base)            # pour montrer ce que le T3 a change

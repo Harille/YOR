@@ -50,11 +50,14 @@ def probabilites_revisees(scenarios, priors, alpha=None, forward_observe=None):
     alpha = cv.ALPHA_T2 if alpha is None else alpha
     observe = marche.FORWARD_CAL27_T2 if forward_observe is None else forward_observe
     sigma = marche.sigma_t2()
+    # Plus le forward qu'un scenario annoncait est loin du prix reellement
+    # observe, plus son poids s'effondre - en cloche, pas lineairement. Un
+    # scenario a 2 sigma perd l'essentiel de sa probabilite.
     poids = {an: priors[an] * float(np.exp(
         -0.5 * ((marche.forward_t2_anticipe(s["niveau"], alpha) - observe) / sigma) ** 2))
         for an, s in scenarios.items()}
     total = sum(poids.values())
-    return {an: p / total for an, p in poids.items()}
+    return {an: p / total for an, p in poids.items()}     # renormaliser a 100 %
 
 
 def mark_to_market(mix, index):
@@ -62,6 +65,9 @@ def mark_to_market(mix, index):
     lignes = []
     for (p, n), mw in sorted(mix.items()):
         h = cv.heures_livrees(p, n, index)
+        # Meme produit, deux prix : celui qu'on a paye, celui qu'il vaut
+        # aujourd'hui. L'ecart est une perte comptable, pas une perte reelle :
+        # l'energie sera livree et vendue a 95 quoi qu'il arrive.
         t1, t2 = marche.prix_eex(p, n, "T1"), marche.prix_eex(p, n, "T2")
         lignes.append({"produit": p, "nature": n, "MW": mw, "MWh": mw * h,
                        "prix T1": t1, "prix T2": t2, "ecart": t2 - t1,
@@ -74,10 +80,15 @@ def marge_t2(scenario, mix_t1, mix_t2, prix_vente=cv.PRIX_VENTE):
     """4.4 - T1 fige, T2 aux prix reels, residuel au spot du scenario, volume revise."""
     courbe = scenario["courbe"]
     index = courbe.index
-    charge = courbe["charge_T2_MW"]
+    charge = courbe["charge_T2_MW"]      # portefeuille revise au 01/12, pas celui du T1
     livre = cv.livraison(mix_t1, index) + cv.livraison(mix_t2, index)
+    # Ce qui reste a regler au spot, heure par heure. Positif = il manque de
+    # l'energie, on achete. Negatif = on en a trop, on revend. Les deux arrivent
+    # dans la meme journee, parce qu'un forward livre une puissance plate.
     residuel = charge - livre
 
+    # Les achats du T1 restent valorises aux prix du T1 : ils ont ete payes a ce
+    # prix-la. Les reevaluer aux prix du T2 serait reecrire l'histoire (§1).
     cout = (cv.cout_mix(mix_t1, index, "T1") + cv.cout_mix(mix_t2, index, "T2")
             + float((residuel * courbe["spot_EUR_MWh"]).sum()))
     volume = scenario["energie_scenario_T2"]
@@ -93,13 +104,18 @@ def main():
     annees = cv.annees_disponibles(cv.ANNEES)
 
     print(f"\n{'=' * 78}\nSCENARIOS (rappel du T1)\n{'=' * 78}")
-    # scen_t1 : niveaux tels qu'ils etaient au T1, ancres sur 83.31
+    # scen_t1 : niveaux tels qu'ils etaient au T1, ancres sur 83.31. On les
+    # reconstruit a l'identique avant de les reajuster : c'est la seule facon de
+    # comparer ce qu'on annoncait a ce qui s'est passe.
     scen_t1, brut, b, priors = cv.construire_jeu(base, annees)
 
     index = next(iter(scen_t1.values()))["courbe"].index
     volumes_q_t1 = (next(iter(scen_t1.values()))["courbe"]["charge_normale_MW"]
                     .groupby(np.asarray(index.quarter)).sum().to_dict())
     v_ref_t1 = sum(volumes_q_t1.values())
+    # Deux jeux de volumes : _t1 avec les effectifs du 22/09, _t2 avec ceux du
+    # 01/12. Les achats du T1 se calculent sur les premiers, ceux du T2 sur les
+    # seconds - d'ou la sur-couverture quand le portefeuille retrecit.
     volumes_q_t2 = (next(iter(scen_t1.values()))["courbe"]["charge_normale_T2_MW"]
                     .groupby(np.asarray(index.quarter)).sum().to_dict())
     v_ref_t2 = sum(volumes_q_t2.values())
@@ -171,6 +187,9 @@ def main():
     print(f"  marge de manoeuvre restante jusqu'a 100 % : {100 * (1 - ratio_t1):.1f} %"
           f" soit {v_ref_t2 - energie_t1:,.0f} MWh (le plan prevoyait {100 * (plan - 0.70):.0f} %)")
 
+    # Garde-fou : le journal des ordres correspond-il encore a ce que les
+    # parametres actuels produiraient ? Si quelqu'un a change CLIENTS ou
+    # STRATEGIES, le message le dit au lieu de laisser passer en silence.
     position.verifier(mix_t1, "T1")
 
     tab_mtm, mtm = mark_to_market(mix_t1, index)
@@ -186,8 +205,11 @@ def main():
     lignes = {}
     mixes = {}
     for libelle, cible in OPTIONS_T2.items():
-        formes = (None,) if cible is None else FORMES_T2
+        formes = (None,) if cible is None else FORMES_T2     # ne rien acheter n'a pas de forme
         for forme in formes:
+            # La cible porte sur la couverture TOTALE. Ce qu'on achete au T2 est
+            # donc la cible moins ce qu'on detient deja. max(..., 0) : on ne
+            # revend pas ici, le reequilibrage est l'affaire du T3.
             part = 0.0 if cible is None else max(cible - ratio_t1, 0.0)
             mix_t2 = {} if part <= 0 else cv.construire_mix(part, volumes_q_t2, index, forme)
             nom = libelle if cible is None else f"{libelle} - {forme}"
@@ -208,6 +230,9 @@ def main():
     print(f"  prix de vente {cv.PRIX_VENTE:.0f} | plancher {cv.PLANCHER_RISQUE:.0f}"
           f" | probabilites revisees | volume {v_ref_t2:,.0f} MWh")
 
+    # Le plancher d'abord, l'esperance ensuite : on choisit la meilleure
+    # esperance PARMI les admissibles, jamais la meilleure dans l'absolu. Si
+    # aucune ne tient, on se rabat sur le moins mauvais pire cas.
     admissibles = options[options["pire cas"] >= cv.PLANCHER_RISQUE]
     choix = (admissibles["esperance"].idxmax() if len(admissibles)
              else options["pire cas"].idxmax())
@@ -218,6 +243,8 @@ def main():
         print(f"     ATTENTION : aucune option ne tient le plancher,"
               f" on retient le moins mauvais pire cas.")
 
+    # La position totale detenue au soir du T2 : les achats du T1 PLUS ceux du
+    # T2. Un meme produit achete aux deux jalons s'additionne en MW.
     mix_final = dict(mix_t1)
     for cle, mw in mixes[choix].items():
         mix_final[cle] = mix_final.get(cle, 0.0) + mw
@@ -229,6 +256,8 @@ def main():
     # T2 - LA DEMANDE NETTE QUI RESTE, HEURE PAR HEURE
     # ==========================================================================
     # ------------------------------------------------- 5. position ouverte 01/01/2027
+    # Zoom sur les 24 heures du 1er janvier : c'est la journee que le prof
+    # demande, et celle sur laquelle portera l'ordre day-ahead du T3.
     jour = index[np.asarray(index.date) == pd.Timestamp(JOUR_SPOT).date()]
     livre = cv.livraison(mix_final, jour)
     pos = pd.DataFrame({"charge normale MW": next(iter(scen_t2.values()))["courbe"]
@@ -239,6 +268,8 @@ def main():
     pos["position normale MW"] = pos["charge normale MW"] - pos["couverture MW"]
     for an in scen_t2:
         pos[f"position {an} MW"] = pos[f"charge {an} MW"] - pos["couverture MW"]
+    # Convention de marche : SHORT = il manque de l'energie, il faut en acheter.
+    # LONG = on en a trop, il faut la revendre. Le signe seul suffit a trancher.
     pos["sens"] = np.where(pos["position normale MW"] > 0, "SHORT (acheter)", "LONG (revendre)")
     pos.index = [f"{h:%H:%M}-{h + pd.Timedelta(hours=1):%H:%M}" for h in pos.index]
 
@@ -261,11 +292,15 @@ def main():
 
 
 def tracer(pos):
+    """Deux panneaux : charge contre couverture, puis la position qui en resulte."""
     fig, axes = plt.subplots(2, 1, figsize=(13, 9))
     x = range(len(pos))
     axes[0].plot(x, pos["charge normale MW"], lw=2, color="tab:green", label="charge (T normale)")
     for col in [c for c in pos.columns if c.startswith("charge 2")]:
         axes[0].plot(x, pos[col], lw=0.9, ls="--", label=col)
+    # En escalier, pas en courbe : un forward livre une puissance CONSTANTE sur
+    # toute sa periode. C'est precisement ce decalage avec la charge qui cree la
+    # position ouverte dessous.
     axes[0].step(x, pos["couverture MW"], where="mid", lw=2, color="tab:red",
                  label="couverture livree")
     axes[0].set_ylabel("MW"); axes[0].legend(fontsize=8); axes[0].set_title(

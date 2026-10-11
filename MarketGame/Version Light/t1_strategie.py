@@ -40,12 +40,18 @@ def main():
     # T1 - POINT 2 : CONSTRUIRE LES SCENARIOS
     # ==========================================================================
     # 2. CONSTRUIRE LES SCENARIOS
+    # On ne garde que les annees dont les DEUX fichiers existent (temperature et
+    # prix) : un scenario sans prix ne sert a rien. Une seule annee ne permettrait
+    # aucune comparaison, donc on arrete plutot que de sortir un resultat trompeur.
     annees = cv.annees_disponibles(cv.ANNEES)
     if len(annees) < 2:
         raise SystemExit("Il faut au moins deux annees pour comparer des scenarios.")
-    base = construire_base()
+    base = construire_base()      # les coefficients Enedis bruts, avant tout calcul
 
     print(f"\n{'=' * 78}\nETAPE 2 - SCENARIOS ({', '.join(map(str, annees))})\n{'=' * 78}")
+    # construire_jeu fait tout d'un coup : pour chaque annee, rejouer sa meteo sur
+    # 2027, en deduire volume et prix, puis ajouter les deux chocs de fondamentaux.
+    # brut = les regressions par annee, b = la pente mutualisee, celle qu'on retient.
     scenarios, brut, b, probabilites = cv.construire_jeu(base, annees)
 
     # ---- etape 2 bis : pente prix-volume et sa qualite
@@ -68,6 +74,10 @@ def main():
         print(f"  les deux chocs sont symetriques : sans celui a la baisse, le manque a"
               f" gagner de la couverture reste invisible.")
 
+    # N'importe quel scenario fait l'affaire comme reference : la colonne
+    # charge_normale_MW est la meme partout, c'est la charge a temperature
+    # NORMALE. C'est elle qui dimensionne les achats - on ne se couvre pas sur
+    # une annee froide particuliere, mais sur l'annee moyenne.
     reference = next(iter(scenarios.values()))["courbe"]
     volumes_q = (reference["charge_normale_MW"]
                  .groupby(reference.index.quarter).sum().to_dict())
@@ -86,8 +96,10 @@ def main():
     lignes = []
     for an, s in scenarios.items():
         ligne = {"annee": an, "Level": s["niveau"]}
-        for a in (0.2, cv.ALPHA_T2, 0.6):
+        for a in (0.2, cv.ALPHA_T2, 0.6):      # trois alpha : prudent, retenu, agressif
             ligne[f"alpha {a}"] = marche.forward_t2_anticipe(s["niveau"], a)
+        # Quel alpha aurait fallu pour tomber pile sur le forward reel du T2 ?
+        # Hors de [0 ; 1], c'est que la meteo seule n'explique pas le mouvement.
         ligne["alpha requis / reel"] = ((marche.FORWARD_CAL27_T2 - marche.FORWARD_CAL27_T1)
                                         / (s["niveau"] - marche.FORWARD_CAL27_T1))
         lignes.append(ligne)
@@ -99,6 +111,9 @@ def main():
     # ==========================================================================
     # ---- etape 4 : mix de produits
     print(f"\n{'=' * 78}\nETAPE 4 - MIX DE PRODUITS, A COUVERTURE EGALE\n{'=' * 78}")
+    # Comparaison a COUVERTURE EGALE : meme 70 % achetes, trois facons de le
+    # faire. Seul le prix change, pas le volume - c'est ce qui rend la
+    # comparaison honnete. [0] = la part achetee au T1 dans le triplet.
     h1_ref = cv.STRATEGIES["Notre strategie 70/20/10"][0]
     index = reference.index
     for forme in ("cal", "trimestres", "trimestres+peak"):
@@ -115,13 +130,15 @@ def main():
     # T1 - POINTS 4 ET 5 : CHOISIR LA MEILLEURE, PUIS L'EXECUTER
     # ==========================================================================
     # ---- etape 5 : marges, choix, couts de la protection
+    # Le coeur du T1 : les neuf strategies passees dans les cinq scenarios, soit
+    # 45 marges. Chaque ligne donne l'esperance, le pire cas et l'admissibilite.
     strat = cv.evaluer_strategies(scenarios, volumes_q, probabilites)
     cv.afficher(strat, f"ETAPE 5 - MARGE PAR STRATEGIE (EUR/MWh, mix {cv.FORME})")
     print(f"  prix de vente {cv.PRIX_VENTE:.0f} | marge cible {cv.MARGE_CIBLE:.0f}"
           f" | plancher {cv.PLANCHER_RISQUE:.0f} | probabilites "
           + ", ".join(f"{an} {probabilites[an]:.0%}" for an in scenarios))
 
-    choix = cv.choisir(strat)
+    choix = cv.choisir(strat)     # la meilleure esperance PARMI les admissibles
     if choix:
         print(f"  -> retenue : {choix} (esperance {strat.loc[choix, 'esperance']:.2f},"
               f" pire cas {strat.loc[choix, 'pire cas']:.2f})")
@@ -138,6 +155,9 @@ def main():
         print(f"     tete de t2_decision.py : les deux peuvent differer, et le §1 des")
         print(f"     guidelines interdit de reecrire un ordre deja passe.")
 
+    # Le prix de la protection : combien d'esperance on cede pour chaque euro de
+    # pire cas gagne. Reference = la strategie la MOINS couverte, celle qui prend
+    # le plus de risque. Se couvrir davantage coute toujours quelque chose.
     ref = strat["couv. prevue %"].idxmin()
     prot = pd.DataFrame({
         "esperance cedee": strat.loc[ref, "esperance"] - strat["esperance"],
@@ -146,6 +166,9 @@ def main():
                                      / prot["pire cas gagne"].replace(0, np.nan))
     cv.afficher(prot, f"COUT DE LA PROTECTION (reference : {ref})")
 
+    # La decision tient-elle si on change un parametre ? On rejoue tout le
+    # tableau en faisant varier, un a un : le plancher, la pente b, alpha, le mix.
+    # Si le choix bascule au moindre reglage, c'est qu'il ne repose sur rien.
     print(f"\n{'=' * 78}\nSENSIBILITE DE LA DECISION\n{'=' * 78}")
     best = strat["pire cas"].idxmax()
     print(f"  meilleure protection possible : {best}"
@@ -188,8 +211,10 @@ def main():
 
 
 def tracer(scenarios):
+    """Trois panneaux : prix, charge, et cout total par scenario."""
     fig, axes = plt.subplots(3, 1, figsize=(14, 11))
     for an, s in scenarios.items():
+        # Moyenne journaliere : 35 040 points par scenario seraient illisibles.
         prix_j = s["courbe"]["spot_EUR_MWh"].resample("D").mean()
         charge_j = s["courbe"]["charge_MW"].resample("D").mean()
         axes[0].plot(prix_j.index, prix_j, lw=0.8, label=f"scenario {an}")

@@ -23,8 +23,10 @@ from pathlib import Path
 
 import figures                              # la table des noms de figures
 
-RACINE = Path(__file__).parent
+RACINE = Path(__file__).parent     # on lance les scripts par chemin absolu
 
+# L'ordre compte : la demande d'abord, les prix ensuite, puis les trois jalons.
+# Le libelle de droite est ce qui s'affiche dans le bandeau de chaque etape.
 ETAPES = [
     ("outils/demande.py", "Le moteur de demande, seul  - courbe de charge et volumes"),
     ("outils/marche.py",  "Un scenario de prix, en detail (pedagogique)"),
@@ -32,6 +34,8 @@ ETAPES = [
     ("t2_decision.py",    "T2  01/12/2026 - actualiser, reviser, decider, executer"),
     ("t3_spot.py",        "T3  31/12/2026 - actualiser, reequilibrer, envoyer les ordres"),
 ]
+# Les trois seuls scripts qui comptent pour le rendu. Les deux premiers de
+# ETAPES sont des demonstrations : utiles a lire, inutiles au resultat.
 JALONS = {"t1_strategie.py", "t2_decision.py", "t3_spot.py"}
 
 
@@ -40,13 +44,20 @@ def main(argv):
     tout = "--tout" in argv or garder        # les figures couvrent les cinq fichiers
     etapes = [e for e in ETAPES if tout or e[0] in JALONS]
 
+    # Deux facons de neutraliser plt.show() : l'enregistrer en PNG, ou jeter la
+    # figure. Dans les deux cas elle ne s'ouvre pas, donc rien ne bloque la suite.
     plt.show = figures.show if garder else (lambda *a, **k: plt.close("all"))
 
     debut = time.time()
     for i, (fichier, titre) in enumerate(etapes, 1):
         print(f"\n{'=' * 78}\n[{i}/{len(etapes)}]  {fichier}\n         {titre}\n{'=' * 78}")
+        # Dire a figures.py quels noms donner aux figures de CE script, et
+        # repartir de la premiere : sans ca, les noms se decaleraient.
         figures.etat["noms"], figures.etat["i"] = figures.NOMS[fichier], 0
         t = time.time()
+        # Chaque script tourne comme s'il etait lance seul : il relit les CSV et
+        # refait tous ses calculs. Rien n'est passe d'une etape a l'autre en
+        # memoire, et c'est voulu - un jalon doit rester relancable isolement.
         runpy.run_path(str(RACINE / fichier), run_name="__main__")
         print(f"\n({fichier} : {time.time() - t:.0f} s)")
 
