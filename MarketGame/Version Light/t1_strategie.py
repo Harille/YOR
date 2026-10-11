@@ -132,8 +132,11 @@ def main():
         print(f"  -> regle de repli : le MEILLEUR PIRE CAS, soit {repli}"
               f" (pire cas {strat.loc[repli, 'pire cas']:+.2f},"
               f" esperance {strat.loc[repli, 'esperance']:.2f} EUR/MWh).")
-        print(f"     C'est cette strategie qui est reprise au T2"
-              f" (STRATEGIE_T1 en tete de t2_decision.py).")
+        print(f"     C'est le meilleur pire cas au moment ou ce tableau est calcule.")
+        print(f"     La strategie REELLEMENT passee au T1 est celle du journal des")
+        print(f"     ordres (outils/position.py), reprise au T2 via STRATEGIE_T1 en")
+        print(f"     tete de t2_decision.py : les deux peuvent differer, et le §1 des")
+        print(f"     guidelines interdit de reecrire un ordre deja passe.")
 
     ref = strat["couv. prevue %"].idxmin()
     prot = pd.DataFrame({
