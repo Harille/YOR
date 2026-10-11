@@ -25,4 +25,4 @@ ses PDF vont dans `donnees/sources/`, que **le code ne lit jamais**.
 Carte du dossier, role de chaque fichier, ou changer quel parametre, ce que
 produit chaque execution, les limites du modele :
 
-`rapport/Market Game 2027 - comprendre le code etape par etape.pdf`
+`rapport/` — voir `rapport/LISEZMOI.md` pour les quatre documents et leurs liens.
