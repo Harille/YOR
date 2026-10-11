@@ -28,7 +28,8 @@ from outils import calendrier
 from outils import couverture as cv
 from outils import marche
 from outils import position
-from outils.demande import CLIENTS, SORTIES, calculer_puissances, construire_base, reviser
+from outils.demande import (CLIENTS, SORTIES, calculer_puissances, construire_base,
+                            pas_horaire, reviser)
 
 JOUR = "2027-01-01"
 HEURE_SPOT = 14            # l'heure demandee par le prof : 14h-15h
@@ -67,7 +68,7 @@ def volumes(base, jalon):
     """Volume 2027 a temperature normale, par trimestre, pour un jalon commercial."""
     d = calculer_puissances(calendrier.projeter(base, 2027))
     p = reviser(d, jalon)["P_totale_kW"]
-    return (p.groupby(np.asarray(p.index.quarter)).sum() * 0.25 / 1000), d
+    return (p.groupby(np.asarray(p.index.quarter)).sum() * pas_horaire(d) / 1000), d
 
 
 def objectif_1(d, vq):
@@ -94,9 +95,15 @@ def objectif_1(d, vq):
 
     besoin = {q: vq[q] for q in vq}
     if SOLAIRE_ANNUEL_MWH:                       # besoin NET de la production propre
+        total_parts = sum(PART_SOLAIRE_TRIMESTRE.values())
+        if abs(total_parts - 1.0) > 1e-6:        # garde-fou : les parts doivent faire 100 %
+            raise ValueError(f"PART_SOLAIRE_TRIMESTRE somme a {total_parts}, attendu 1.0")
         for q in besoin:
-            besoin[q] -= SOLAIRE_ANNUEL_MWH * vq[q] / sum(vq.values())
-        print(f"  besoin net de {SOLAIRE_ANNUEL_MWH:,.0f} MWh de production solaire")
+            besoin[q] -= SOLAIRE_ANNUEL_MWH * PART_SOLAIRE_TRIMESTRE[q]
+        print(f"  besoin net de {SOLAIRE_ANNUEL_MWH:,.0f} MWh de production solaire,"
+              f" repartis par saison : "
+              + ", ".join(f"Q{q} {100 * PART_SOLAIRE_TRIMESTRE[q]:.0f} %"
+                          for q in sorted(PART_SOLAIRE_TRIMESTRE)))
 
     lignes = []
     for q in sorted(besoin):
