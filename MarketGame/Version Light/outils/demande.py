@@ -24,6 +24,9 @@ from outils import calendrier
 
 ANNEE_CIBLE = 2027
 
+# puissance_souscrite x theta = FUD, ce qu'un client consomme quand le
+# coefficient de profil vaut 1. C'est ce produit qui donne son NIVEAU a la
+# courbe ; le coefficient Enedis, lui, n'en donne que la forme.
 PARAMS = {                                      # reference : portefeuille au T1
     "RES1": {"nb_clients": 200_000, "puissance_souscrite": 4.5, "theta": 0.0521},
     "PRO1": {"nb_clients": 5_000, "puissance_souscrite": 36.0, "theta": 0.08004},
@@ -34,9 +37,12 @@ CLIENTS = {                                     # previsions commerciales succes
     "T3": {"RES1": 191_531, "PRO1": 4_745},     # 31/12/2026  (-4,5 % / -5,1 % vs T1)
 }
 
+# PREPARE : le coefficient publie a l'avance, celui dont un fournisseur dispose
+# au moment de se couvrir. AJUSTE et DYNAMIQUE ne sont connus qu'apres coup -
+# les utiliser reviendrait a decider avec une information future (§1).
 COEF_COL = "COEFFICIENT_PREPARE"
-T_SEUIL = 15.0
-AFFINER_AU_QUART_HEURE = True
+T_SEUIL = 15.0                   # au-dessus, plus de chauffage : la meteo ne joue plus
+AFFINER_AU_QUART_HEURE = True    # passer de 30 min a 15 min, cf. affiner_au_quart_heure
 
 DOSSIER = Path(__file__).resolve().parent.parent   # la racine du projet, pas outils/
 DONNEES = DOSSIER / "donnees"           # ce que fournit le prof : on ne l'ecrit jamais
@@ -73,6 +79,13 @@ def _horodate(serie):
 
 
 def affiner_au_quart_heure(demi_horaire, quart_horaire):
+    """Donne au coefficient demi-horaire la finesse du quart d'heure.
+
+    Le PREPARE est publie au pas de 30 min, le DYNAMIQUE au pas de 15 min. On
+    garde le NIVEAU du prepare (seul disponible a l'avance) et on lui emprunte
+    sa forme interne : le ratio vaut 1 en moyenne sur chaque demi-heure, donc
+    l'energie totale ne bouge pas d'un gramme.
+    """
     demi_heure = quart_horaire.index.tz_convert("UTC").floor("30min")
     ratio = quart_horaire / quart_horaire.groupby(demi_heure).transform("mean")
     return demi_horaire * ratio
@@ -81,6 +94,8 @@ def affiner_au_quart_heure(demi_horaire, quart_horaire):
 def charger_coefficients(profil):
     df = pd.read_csv(FICHIERS[profil], sep=",", decimal=".")
     df["HORODATE"] = _horodate(df["HORODATE"])
+    # Le passage a l'heure d'hiver cree deux fois la meme heure locale : on
+    # garde la premiere occurrence, sinon le dedoublonnage fausse octobre.
     df = df.drop_duplicates(subset="HORODATE", keep="first").sort_values("HORODATE")
     df = df.set_index("HORODATE")
     coef = df[COEF_COL]
@@ -111,13 +126,28 @@ def charger_temperatures():
 
 
 def construire_base():
+    """Les quatre fichiers du prof alignes sur un seul index temporel."""
     df = charger_coefficients("RES1")
+    # how="inner" : on ne garde que les horodates presentes PARTOUT. Un pas de
+    # temps sans temperature ou sans gradient donnerait une puissance fausse ;
+    # mieux vaut le perdre que le remplir au hasard.
     for autre in (charger_coefficients("PRO1"), charger_gradients(), charger_temperatures()):
         df = df.merge(autre, on="HORODATE", how="inner")
     return df.set_index("HORODATE").sort_index()
 
 
 def coefficient_meteo(gradient, t_normale, t_realisee, t_seuil=T_SEUIL):
+    """CM, le correctif de thermosensibilite RTE. Quatre cas, un par position
+    des deux temperatures vis-a-vis du seuil de chauffe (15 degres).
+
+    1. les deux sous le seuil   -> l'ecart complet joue
+    2. realisee seule sous      -> seul l'ecart AU SEUIL joue (en dessus, rien)
+    3. normale seule sous       -> idem, dans l'autre sens
+    4. les deux au-dessus       -> CM = 1, personne ne chauffe
+
+    Multiplicatif, jamais additif : CM = 1 laisse la charge intacte, et c'est le
+    cas 59 % du temps dans l'annee.
+    """
     T, Tn, Ts = t_realisee, t_normale, t_seuil
     cm = np.select(
         [(T < Ts) & (Tn < Ts), (T < Ts) & (Tn >= Ts), (Tn < Ts) & (T >= Ts), (T >= Ts) & (Tn >= Ts)],
@@ -138,6 +168,10 @@ def calculer_puissances(df, jalon=None):
         f = fud(profil)
         nb = PARAMS[profil]["nb_clients"] if jalon is None else CLIENTS[jalon][profil]
         coef = out[f"coef_{profil}"]
+        # Deux colonnes pour deux usages : P_ sans meteo (temperature normale,
+        # ce qui dimensionne les achats) et P_dyn_ avec meteo (ce qui serait
+        # reellement consomme cette annee-la). Les scenarios jouent sur la
+        # seconde, la couverture se decide sur la premiere.
         out[f"CM_{profil}"] = coefficient_meteo(
             out[f"grad_{profil}"], out["temperature_normale_lissee_degc"],
             out["temperature_realisee_lissee_degc"])
@@ -153,7 +187,12 @@ def _totaliser(out):
 
 
 def reviser(df, jalon="T2"):
-    """Portefeuille a un jalon donne : la puissance est lineaire en nombre de clients."""
+    """Portefeuille a un jalon donne : la puissance est lineaire en nombre de clients.
+
+    Perdre 6 % des clients retire 6 % de la puissance, a chaque pas de temps.
+    L'hypothese tient parce que les partants ont le meme profil que les
+    restants - c'est l'hypothese du profilage Enedis lui-meme.
+    """
     out = df.copy()
     for profil, nb in CLIENTS[jalon].items():
         facteur = nb / PARAMS[profil]["nb_clients"]
@@ -166,6 +205,11 @@ reviser_t2 = reviser                            # ancien nom, conserve pour scen
 
 
 def pas_horaire(df):
+    """Duree d'un pas en heures : 0,25 au quart d'heure, 0,5 a la demi-heure.
+
+    Toujours deduite des donnees, jamais ecrite en dur : c'est elle qui convertit
+    une puissance (kW) en energie (kWh), partout dans le projet.
+    """
     return (df.index[1] - df.index[0]).total_seconds() / 3600.0
 
 
@@ -183,7 +227,12 @@ def mois(df, col="P_dyn_totale_kW"):
 
 
 def masque_peak(index):
-    """Heures Peak EEX : lundi-vendredi 08h-20h, jours feries inclus."""
+    """Heures Peak EEX : lundi-vendredi 08h-20h, jours feries inclus.
+
+    Les feries ne sont PAS exclus, et c'est la regle du marche, pas un oubli :
+    un produit Peak livre le 1er janvier 2027 comme un vendredi ordinaire, alors
+    que la consommation y est creuse. C'est le piege signale dans l'enonce.
+    """
     return (index.weekday < 5) & (index.hour >= 8) & (index.hour < 20)
 
 
@@ -199,6 +248,9 @@ def peak_offpeak(df, col="P_dyn_totale_kW"):
 def thermosensibilite(df):
     """Sensibilite du portefeuille, en MW par degre perdu (gradient x puissance)."""
     s = sum(df[f"P_{p}_kW"] * df[f"grad_{p}"] for p in PARAMS) / 1000.0
+    # Zero hors periode de chauffe : en aout, un degre de moins ne fait allumer
+    # aucun radiateur. Sans ce filtre, la sensibilite moyenne serait gonflee par
+    # des mois ou elle n'existe pas.
     s = s.where(df["temperature_normale_lissee_degc"] < T_SEUIL, 0.0)
     return s.rename("MW_par_degre")
 
@@ -207,6 +259,8 @@ def resume(df, titre):
     print(f"\n{'=' * 70}\n{titre}\n{'=' * 70}")
     print(f"Periode : {df.index.min():%d/%m/%Y} -> {df.index.max():%d/%m/%Y}"
           f"  ({len(df):,} pas de {pas_horaire(df) * 60:.0f} min)")
+    # CM identiquement egal a 1 partout = on regarde une annee a temperature
+    # normale, pas une annee meteo. Le dire evite de confondre les deux tableaux.
     plat = all((df[f"CM_{p}"] - 1).abs().max() < 1e-12 for p in PARAMS)
     print("Scenario : temperature NORMALE (CM = 1)" if plat else "Scenario : temperature REALISEE")
 

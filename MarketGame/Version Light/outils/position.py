@@ -29,6 +29,8 @@ ACHETE = {
     ("Cal-27", "Base"): (14.42, "T2"),     # 01/12/2026, completement a 100 %
 }
 
+# Marge d'arrondi : 0,05 MW sur 50 MW, soit un millieme. En dessous, c'est du
+# bruit de calcul ; au-dessus, quelqu'un a change un parametre.
 TOLERANCE_MW = 0.05        # au-dela, le journal ne decrit plus les parametres actuels
 
 
@@ -45,6 +47,9 @@ def verifier(mix_calcule, jalon, bavard=True):
     """
     journal = au_jalon(jalon)
     ecarts = []
+    # Union des deux dictionnaires, pas intersection : un produit present d'un
+    # seul cote est justement l'anomalie qu'on cherche a voir (achat oublie au
+    # journal, ou produit disparu des parametres).
     for cle in sorted(set(journal) | set(mix_calcule)):
         attendu, note = mix_calcule.get(cle, 0.0), journal.get(cle, 0.0)
         if abs(attendu - note) > TOLERANCE_MW:

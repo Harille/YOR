@@ -22,8 +22,8 @@ import pandas as pd
 from outils import marche
 from outils.demande import SORTIES, construire_base, masque_peak
 
-ANNEES = [2021, 2023, 2024]
-MOIS_HIVER = [1, 2, 3, 11, 12]
+ANNEES = [2021, 2023, 2024]      # 2022 ecartee : crise du gaz, niveau non reproductible
+MOIS_HIVER = [1, 2, 3, 11, 12]   # la ou le lien prix-volume existe (chauffage)
 
 PRIX_VENTE = 95.0          # EUR/MWh, impose par le Conseil
 MARGE_CIBLE = 10.0         # EUR/MWh
@@ -37,6 +37,9 @@ PROFILS_RISQUE = {
     "Balanced (WCM >= 0)": 0.0,
     "Risky    (WCM >= -5)": -5.0,
 }
+# alpha = 0 : le marche ne bougera pas d'ici au T2. alpha = 1 : il rejoindra
+# entierement le Level du scenario. 0,50 = position mediane, fixee UNE FOIS avant
+# de voir le prix reel - la choisir apres coup serait de la retroactivite.
 ALPHA_T2 = 0.50            # part du scenario deja dans les prix au 01/12/2026
 FORME = "trimestres"       # "cal" | "trimestres" | "trimestres+peak"
 
@@ -49,6 +52,9 @@ FORME = "trimestres"       # "cal" | "trimestres" | "trimestres+peak"
 CHOC_FONDAMENTAL = 0.20    # 0.0 pour desactiver les deux chocs
 PROBA_CHOC = 0.15          # probabilite de CHAQUE choc (hausse et baisse)
 
+# Neuf facons d'etaler les achats dans le temps. Le total (T1 + T2) n'atteint
+# jamais 100 % : ce qui reste se regle au spot, et c'est deliberement une
+# position ouverte, pas un oubli.
 STRATEGIES = {             # (part achetee a T1, part planifiee pour T2) - le reste au SPOT
     "Notre strategie 70/20/10": (0.70, 0.20),
     "Variante 50/25/25":        (0.50, 0.25),
@@ -66,7 +72,12 @@ MOIS_EEX = {"Jan": 1, "Feb": 2, "Mar": 3, "Apr": 4, "May": 5, "Jun": 6}
 
 # --------------------------------------------------------------- produits EEX
 def fenetre(produit, nature, index):
-    """Masque des pas de temps ou le produit livre effectivement."""
+    """Masque des pas de temps ou le produit livre effectivement.
+
+    Un Cal-27 livre les 8 760 heures, un Q2-27 seulement les 2 184 heures du
+    deuxieme trimestre. C'est cette fenetre qui fait qu'un meme MW n'a pas la
+    meme valeur energetique selon le produit.
+    """
     nom = produit.split("-")[0]
     if nom == "Cal":
         m = np.ones(len(index), dtype=bool)
@@ -84,7 +95,12 @@ def heures_livrees(produit, nature, index):
 
 
 def livraison(mix, index):
-    """mix = {(produit, nature): MW} -> puissance livree a chaque heure."""
+    """mix = {(produit, nature): MW} -> puissance livree a chaque heure.
+
+    Les produits s'empilent : un Cal et un Q1 detenus ensemble livrent leur
+    somme en janvier. C'est cette courbe en escalier qu'on compare a la charge
+    pour obtenir la position ouverte.
+    """
     out = pd.Series(0.0, index=index)
     for (produit, nature), mw in mix.items():
         out += mw * fenetre(produit, nature, index)
@@ -97,7 +113,12 @@ def cout_mix(mix, index, jalon="T1"):
 
 
 def construire_mix(part, volumes_q, index, forme=None, ratio_peak=1.32):
-    """Convertit une part de volume en MW par produit EEX (etape 4 du cours)."""
+    """Convertit une part de volume en MW par produit EEX (etape 4 du cours).
+
+    On raisonne en energie (MWh a couvrir), le marche se traite en puissance
+    (MW) : diviser par les heures de livraison fait la conversion. "cal" lisse
+    sur l'annee, "trimestres" epouse la saison, "+peak" epouse aussi la journee.
+    """
     forme = FORME if forme is None else forme
     if forme == "cal":
         return {("Cal-27", "Base"): part * sum(volumes_q.values())
@@ -202,7 +223,12 @@ def reajuster(scenario, b, forward):
 
 # --------------------------------------------------------------------- marges
 def marge(scenario, h1, h2, volumes_q, alpha=None, forme=None, prix_vente=PRIX_VENTE):
-    """Marge d'une strategie : vente - couverture T1 - tranche T2 - residuel au spot."""
+    """Marge d'une strategie : vente - couverture T1 - tranche T2 - residuel au spot.
+
+    Les trois termes de cout n'ont pas le meme statut : le T1 est au prix reel
+    du 22/09, le T2 au forward ANTICIPE (il n'a pas encore eu lieu), le residuel
+    au spot du scenario. C'est la formule EM_4 p.24, appliquee heure par heure.
+    """
     alpha = ALPHA_T2 if alpha is None else alpha
     courbe = scenario["courbe"]
     index = courbe.index
@@ -211,11 +237,16 @@ def marge(scenario, h1, h2, volumes_q, alpha=None, forme=None, prix_vente=PRIX_V
 
     mix_t1 = construire_mix(h1, volumes_q, index, forme)
     livre_t1 = livraison(mix_t1, index)
+    # La tranche T2 est modelisee comme un ruban plat : au T1, on sait combien on
+    # achetera, pas sous quelle forme. Lui donner une forme precise serait se
+    # donner une information qu'on n'a pas encore.
     mw_t2 = h2 * v_ref / len(index)              # tranche T2 : ruban, prix encore inconnu
     residuel = courbe["charge_MW"] - livre_t1 - mw_t2
 
     cout = (cout_mix(mix_t1, index, "T1") + h2 * v_ref * forward_t2
             + float((residuel * courbe["spot_EUR_MWh"]).sum()))
+    # On vend ce que le client consomme REELLEMENT dans ce scenario, pas le
+    # volume normal : un hiver froid fait plus de recette, et plus de cout.
     volume_vendu = scenario["energie_scenario"]
     marge_eur = prix_vente * volume_vendu - cout
     return {"forward_T2": forward_t2, "cout_total": cout, "marge_EUR": marge_eur,
@@ -236,6 +267,9 @@ def evaluer_strategies(scenarios, volumes_q, probabilites=None, alpha=None, form
                  "couv. prevue %": max(d["couv_prevue_%"] for d in det.values()),
                  "couv. max realisee %": max(d["couv_realisee_%"] for d in det.values())}
         ligne.update({f"marge {an}": m for an, m in marges.items()})
+        # Esperance : moyenne ponderee par les probabilites. Pire cas : le
+        # minimum brut, sans ponderation - un scenario improbable mais ruineux
+        # reste ruineux, c'est tout l'interet de regarder les deux.
         ligne["esperance"] = sum(probabilites[an] * m for an, m in marges.items())
         ligne["pire cas"] = min(marges.values())
         ligne["admissible"] = ligne["pire cas"] >= PLANCHER_RISQUE
@@ -247,6 +281,12 @@ def evaluer_strategies(scenarios, volumes_q, probabilites=None, alpha=None, form
 
 
 def choisir(strat, plancher=None):
+    """La meilleure esperance PARMI les strategies admissibles, ou None.
+
+    L'ordre est la regle du cours : le plancher filtre d'abord, l'esperance
+    departage ensuite. Une strategie a forte esperance mais sous le plancher est
+    ecartee sans discussion - la contrainte ne se negocie pas.
+    """
     plancher = PLANCHER_RISQUE if plancher is None else plancher
     ok = strat[strat["pire cas"] >= plancher]
     return ok["esperance"].idxmax() if len(ok) else None

@@ -23,8 +23,8 @@ from outils import calendrier
 from outils.demande import (ANNEE_CIBLE, SORTIES, entree, calculer_puissances,
                                 construire_base, pas_horaire, reviser_t2)
 
-ANNEE_HISTORIQUE = 2021
-PRIME_DE_RISQUE = 0.03
+ANNEE_HISTORIQUE = 2021        # l'annee montree en detail quand on lance ce fichier seul
+PRIME_DE_RISQUE = 0.03         # impose : ce que le vendeur de forward facture pour le risque
 VOLATILITE_CRE = 0.20          # volatilite annuelle des forwards annuels (estimation CRE)
 JOURS_T1_T2 = 70               # du 22/09/2026 au 01/12/2026
 
@@ -44,6 +44,7 @@ EEX = {
     "May-27": (39.33, 26.13, 37.03, 25.09, 37.71, 25.24),
     "Jun-27": (36.90, 39.89, 35.12, 38.70, 35.42, 38.93),
 }
+# Decalage dans le tuple EEX : chaque jalon occupe deux places, Base puis Peak.
 JALONS = {"T1": 0, "T2": 2, "T3": 4}
 FORWARD_CAL27_T1 = EEX["Cal-27"][0]
 FORWARD_CAL27_T2 = EEX["Cal-27"][2]
@@ -51,6 +52,9 @@ FORWARD_CAL27_T3 = EEX["Cal-27"][4]
 
 
 def prix_eex(produit, nature="Base", jalon="T1"):
+    """Le prix de reglement d'un produit a un jalon. Point d'entree unique :
+    personne ne lit la table EEX directement, pour qu'une mise a jour des prix
+    du prof n'ait a toucher qu'un seul endroit."""
     return EEX[produit][{"Base": 0, "Peak": 1}[nature] + JALONS[jalon]]
 
 
@@ -128,20 +132,33 @@ def charger_prix_entsoe(chemin):
 
 
 def _cle_calendaire(index):
+    """Un entier qui identifie un instant DANS l'annee, sans l'annee elle-meme :
+    MMJJhhmm. C'est ce qui permet d'aller chercher le 5 mars a 14h15 de 2021
+    pour le poser sur le 5 mars a 14h15 de 2027, sans se soucier du millesime."""
     return (index.month.astype("int64") * 1_000_000 + index.day.astype("int64") * 10_000
             + index.hour.astype("int64") * 60 + index.minute.astype("int64")).to_numpy()
 
 
 def _reindexer_par_calendrier(source, index_cible):
+    """Projette une serie d'une annee sur une autre, par position calendaire."""
     src = source.sort_index()
     cles = _cle_calendaire(src.index)
-    garde = np.concatenate([[True], np.diff(cles) != 0])
+    garde = np.concatenate([[True], np.diff(cles) != 0])     # un seul point par instant
     cles, valeurs = cles[garde], src.to_numpy()[garde]
+    # searchsorted - 1 = "la derniere valeur connue a cet instant ou avant".
+    # Un pas manquant dans la source reprend donc le precedent, au lieu de
+    # produire un trou qu'il faudrait boucher apres coup.
     pos = np.searchsorted(cles, _cle_calendaire(index_cible), side="right") - 1
     return pd.Series(valeurs[pos].astype(float), index=index_cible)
 
 
 def injecter_temperature(cible, source):
+    """Remplace la temperature realisee de la cible par celle d'une annee source.
+
+    C'est LA fabrication d'un scenario : on garde le calendrier 2027 et les
+    clients de 2027, on ne change que la meteo. La temperature normale, elle,
+    n'est jamais touchee - c'est la reference a laquelle on compare.
+    """
     out = cible.copy()
     valeurs = _reindexer_par_calendrier(source, out.index)
     valeurs = valeurs.fillna(out["temperature_normale_lissee_degc"])
@@ -157,8 +174,14 @@ def volumes_journaliers(df):
 
 
 def anomalies(volumes, prix_horaire):
+    """Ecarts a la normale, jour par jour : de prix d'un cote, de volume de
+    l'autre. C'est la matiere premiere de la regression qui donne b.
+    """
     prix_jour = prix_horaire.groupby(prix_horaire.index.date).mean()
     prix_jour.index = pd.to_datetime(prix_jour.index)
+    # Reference MENSUELLE, pas annuelle : janvier est structurellement plus cher
+    # que juin. Sans ce de-niveau par mois, la regression mesurerait la saison
+    # au lieu de mesurer le froid.
     moyenne_mois = prix_jour.groupby(prix_jour.index.month).transform("mean")
 
     tab = pd.DataFrame({"prix": prix_jour,
@@ -174,6 +197,8 @@ def pente_prix_volume(tab):
     """Regression anomalie_prix = b x anomalie_volume. Qualite = r et r carre."""
     x = tab["anomalie_volume"].to_numpy()
     y = tab["anomalie_prix"].to_numpy()
+    # Pente des moindres carres : covariance sur variance. b = +2,45 veut dire
+    # qu'un volume superieur de 1 % s'accompagne d'un prix superieur de 2,45 %.
     b = np.cov(x, y, ddof=0)[0, 1] / np.var(x)
     r = np.corrcoef(x, y)[0, 1]
     n = len(x)
@@ -185,6 +210,9 @@ def pente_prix_volume(tab):
 
 def scenario_spot(prix_hist, niveau, index_cible):
     """Level x Shape : la forme historique est normalisee a 1, le niveau vient du forward."""
+    # Diviser par la moyenne efface le niveau de l'annee historique et ne garde
+    # que sa forme. 2022 valait 250 EUR/MWh en moyenne : sans normalisation, ce
+    # niveau de crise se retrouverait colle sur 2027.
     forme = prix_hist / prix_hist.mean()
     valeurs = _reindexer_par_calendrier(forme, index_cible).fillna(1.0)
     return pd.Series(niveau * valeurs.to_numpy(), index=index_cible, name="spot")
@@ -197,9 +225,13 @@ def construire_scenario(annee_hist, base, b_impose=None, forward=None, bavard=Tr
 
     hist = injecter_temperature(calendrier.projeter(base, annee_hist), temp)
     tab = anomalies(volumes_journaliers(calculer_puissances(hist)), prix)
+    # Hiver seulement : c'est la que le lien prix-volume existe. L'ete, la
+    # consommation ne depend pas du froid et la relation disparait dans le bruit.
     reg = pente_prix_volume(tab[tab.index.month.isin([1, 2, 3, 11, 12])])
     b = reg["b"] if b_impose is None else b_impose
 
+    # Deux fois la meme annee cible : une a temperature normale (la reference)
+    # et une avec la meteo du scenario. Leur ecart de volume est l'anomalie a.
     cible_normal = calculer_puissances(calendrier.projeter(base, ANNEE_CIBLE))
     cible_scen = calculer_puissances(
         injecter_temperature(calendrier.projeter(base, ANNEE_CIBLE), temp))
@@ -212,6 +244,8 @@ def construire_scenario(annee_hist, base, b_impose=None, forward=None, bavard=Tr
     e_scen_t2 = cible_scen_t2["P_dyn_totale_kW"].sum() * h / 1000.0
     anomalie = e_scen / e_normal - 1
 
+    # LA formule du cours (EM_4). Trois termes : le forward du marche, moins la
+    # prime que le vendeur y a mise, corrige de ce que le froid ferait au prix.
     niveau = forward * (1 - PRIME_DE_RISQUE) * (1 + b * anomalie)
     res = pd.DataFrame({
         "charge_MW": cible_scen["P_dyn_totale_kW"].resample("h").mean() / 1000.0,
