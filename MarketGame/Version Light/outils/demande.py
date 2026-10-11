@@ -7,10 +7,11 @@ Ce que ca fait  : profil Enedis (FUD = Ps x Theta) -> thermosensibilite RTE
                   trimestriel, peak / off-peak.
 Ce que ca lit   : donnees/RES1_BASE.csv, PRO1_BASE.csv, gradients.csv,
                   temperature_2025.csv
-Ce que ca ecrit : sorties/courbe_de_charge_2025.csv, _2027.csv, _2027_T2.csv
-                  (ecrits par main(), appele depuis t1_strategie.py)
+Ce que ca ecrit : rien par defaut. EXPORTER_COURBES = True ressort les trois
+                  courbes au pas de 15 min (sorties/courbe_de_charge_*.csv,
+                  20 Mo, pour Excel) ; aucun script ne les relit.
 A changer ici   : CLIENTS (effectifs aux trois jalons), COEF_COL, T_SEUIL,
-                  AFFINER_AU_QUART_HEURE
+                  AFFINER_AU_QUART_HEURE, EXPORTER_COURBES
 Dans le rapport : etapes 1 a 5
 """
 from pathlib import Path
@@ -41,6 +42,11 @@ DOSSIER = Path(__file__).resolve().parent.parent   # la racine du projet, pas ou
 DONNEES = DOSSIER / "donnees"           # ce que fournit le prof : on ne l'ecrit jamais
 SORTIES = DOSSIER / "sorties"           # ce que le code produit : efface-le quand tu veux
 SORTIES.mkdir(exist_ok=True)
+
+# Les trois courbes de charge au pas de 15 min pesent 20 Mo a elles seules, et
+# aucun script ne les relit : tout ce qu'elles contiennent est deja dans les
+# figures et dans les volumes imprimes. Passer a True pour les ressortir (Excel).
+EXPORTER_COURBES = False
 
 
 def entree(*morceaux):
@@ -272,24 +278,30 @@ def main():
 
     hist = calculer_puissances(base)
     resume(hist, f"BACKTEST {an_source} - temperature realisee")
-    hist.to_csv(SORTIES / f"courbe_de_charge_{an_source}.csv", sep=";", decimal=",")
+    if EXPORTER_COURBES:
+        hist.to_csv(SORTIES / f"courbe_de_charge_{an_source}.csv", sep=";", decimal=",")
 
     if ANNEE_CIBLE is None or ANNEE_CIBLE == an_source:
         return hist, hist
 
     cible = calculer_puissances(calendrier.projeter(base, ANNEE_CIBLE))
     resume(cible, f"LIVRABLE T1 {ANNEE_CIBLE} - temperature normale, portefeuille au 22/09/2026")
-    cible.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}.csv", sep=";", decimal=",")
+    if EXPORTER_COURBES:
+        cible.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}.csv", sep=";", decimal=",")
 
     t2 = reviser_t2(cible)
     e1 = energies(cible)["P_dyn_totale_kW"]
     e2 = energies(t2)["P_dyn_totale_kW"]
     resume(t2, f"LIVRABLE T2 {ANNEE_CIBLE} - portefeuille revise au 01/12/2026")
     print(f"\n  revision commerciale : {e1:,.0f} -> {e2:,.0f} MWh ({e2 / e1 - 1:+.2%})")
-    t2.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}_T2.csv", sep=";", decimal=",")
+    if EXPORTER_COURBES:
+        t2.to_csv(SORTIES / f"courbe_de_charge_{ANNEE_CIBLE}_T2.csv", sep=";", decimal=",")
 
-    print(f"\n-> Exports dans sorties/ : courbe_de_charge_{an_source}.csv, courbe_de_charge_{ANNEE_CIBLE}.csv,"
-          f" courbe_de_charge_{ANNEE_CIBLE}_T2.csv")
+    if EXPORTER_COURBES:
+        print(f"\n-> Exports dans sorties/ : courbe_de_charge_{an_source}.csv,"
+              f" courbe_de_charge_{ANNEE_CIBLE}.csv, courbe_de_charge_{ANNEE_CIBLE}_T2.csv")
+    else:
+        print("\n-> Aucun CSV de courbe de charge (EXPORTER_COURBES = False)")
     return hist, cible
 
 
