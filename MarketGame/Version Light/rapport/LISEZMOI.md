@@ -11,6 +11,18 @@ Version Light soit complet quand on l'envoie ou qu'on le consulte hors ligne.
 | 3 | Le code du Market Game — guide de lecture | le dossier, les modules, ou changer quoi | [ouvrir](https://claude.ai/code/artifact/1c59af96-b2e5-4693-b926-0ecd7100253b) |
 | 4 | Les resultats | tous les chiffres sortis aux trois jalons | [ouvrir](https://claude.ai/code/artifact/903a6214-4d1a-4007-aa2e-085e0e35d298) |
 
+## Les quatre fiches condensees
+
+Les memes contenus, reduits aux chiffres et aux definitions, sans les
+explications. A lire avant une seance, ou a garder sous la main pendant.
+
+| # | Fiche | Lien |
+| --- | --- | --- |
+| 1 | La theorie du cours | [ouvrir](https://claude.ai/artifact/HvZ7SBwzfuzJRbRkXcSaKv) |
+| 2 | Le Market Game | [ouvrir](https://claude.ai/artifact/WQnSFNy3u9bQFJ745iQFj2) |
+| 3 | Le code | [ouvrir](https://claude.ai/artifact/YT5T9wLaTUNw3BEAb1mU1e) |
+| 4 | Les resultats | [ouvrir](https://claude.ai/artifact/V1CGnm2d72G5LBUDFQmtjr) |
+
 ## Mettre a jour une copie
 
 La copie ne se met pas a jour toute seule. Quand un document change :
