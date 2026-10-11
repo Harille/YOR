@@ -35,8 +35,9 @@ avec les memes bandeaux de section.
 | `outils/demande.py` | profils Enedis, thermosensibilite, courbe de charge, volumes |
 | `outils/marche.py` | prix EEX aux trois jalons, scenarios de prix, methode alpha |
 | `outils/couverture.py` | produits, mix de couverture, marge, strategies, scenarios |
+| `outils/position.py` | le journal des ordres reellement passes au T1 et au T2 |
 
-T1, T2 et T3 empruntent **26 fonctions et constantes** a ces quatre fichiers.
+T1, T2 et T3 empruntent **26 fonctions et constantes** a ces cinq fichiers.
 C'est ce qui garantit que le calcul est identique aux trois jalons.
 
 ## Le dossier
@@ -95,9 +96,16 @@ mise a jour, pour savoir quoi changer et ou.
 Imposes par le Conseil (section 2.2 des guidelines) : prix de vente 95 EUR/MWh,
 marge cible 10, plancher de risque 5, prime de risque forward 3 %.
 
-Deux constantes attendent encore une information du prof, et valent `None` :
-`SOLAIRE_ANNUEL_MWH` (la centrale de 80 MWc produit-elle toute l'annee ?) et
-`PRIX_CLEARING` (le prix spot publie, pour calculer le hedge success).
+Une seule constante attend encore une information du prof et vaut `None` :
+`PRIX_CLEARING`, le prix spot du 1er janvier. Il se forme pendant l'enchere et
+n'est publie nulle part avant la seance ; le hedge success se calcule apres.
+
+Le productible du solaire, lui, est tranche : l'exercice SPOT confirme que la
+centrale produit toute l'annee, mais ne donne pas combien. `SOLAIRE_ANNUEL_MWH`
+vaut donc 96 000 MWh (80 MWc x 1 200 kWh/kWc) — **c'est notre hypothese**, et
+c'est le parametre le plus lourd du T3. Sa repartition par trimestre suit un
+profil PV reel (`PART_SOLAIRE_TRIMESTRE` : 15 / 33 / 34 / 18 %) et non le
+rythme de la consommation : une centrale ne produit pas le plus en janvier.
 
 ## Le rapport
 
