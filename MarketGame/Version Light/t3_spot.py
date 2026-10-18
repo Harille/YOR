@@ -70,12 +70,13 @@ PRIX_CLEARING = [70, 10, 10, 10, 10, 10, 10, 10,
                  70, 70, 70, 70, 70, 70, 70, 70,
                  180, 180, 500, 500, 500, 180, 180, 70]
 
-# Le ruban livre le 1er janvier a ete paye aux T1 et T2, pas ce jour-la. On lui impute
-# le prix moyen de TOUTE la couverture : le journal ne retient que les MW, pas les prix
-# par produit (outils/position.py), donc c'est une convention d'allocation et pas un
-# releve. Le Q1 ayant ete paye plus cher que la moyenne annuelle — c'est le trimestre
-# d'hiver — la marge du jour calculee ici est un peu optimiste.
-PRIX_FORWARD_MOYEN = 84.06      # EUR/MWh paye en moyenne sur les achats T1 + T2
+# Le ruban livre le 1er janvier a ete paye aux T1 et T2, pas ce jour-la. Son prix se
+# RECONSTITUE produit par produit — chaque ligne de la position garde le jalon ou elle
+# a ete achetee — et seuls les produits qui livrent ce jour-la comptent. Imputer le
+# prix moyen annuel serait une faute de meme nature que celle qu'on reproche a un
+# ruban plat : la moyenne melange les trimestres d'ete, qui ne livrent rien le
+# 1er janvier et qui ont ete payes trois fois moins cher que le Q1.
+PRIX_FORWARD_MOYEN = 84.06      # repli seulement, si la position n'est pas transmise
 PRIX_VENTE = 95.0               # EUR/MWh impose par le Conseil
 
 
@@ -235,7 +236,29 @@ def journee_par_scenario(base):
     return out
 
 
-def ordre_spot(h, heure=HEURE_SPOT):
+def prix_du_ruban(h, couverture):
+    """Prix moyen paye pour le forward livre ce jour-la, produit par produit.
+
+    Renvoie (prix, detail). Chaque ligne de la position porte le jalon ou elle a
+    ete achetee : c'est lui qui donne le prix EEX a retenir, pas le jalon courant.
+    Les produits qui ne livrent pas ce jour-la pesent zero heure et sortent d'eux-
+    memes — un Q3-27 ne finance rien le 1er janvier.
+    """
+    if couverture is None:
+        return PRIX_FORWARD_MOYEN, None
+    detail = []
+    for (produit, nature), (mw, jalon) in sorted(couverture.items()):
+        mwh = float(mw) * float(cv.fenetre(produit, nature, h.index).sum())
+        if abs(mwh) > 1e-9:
+            detail.append((produit, nature, jalon, mwh,
+                           marche.prix_eex(produit, nature, jalon)))
+    total = sum(d[3] for d in detail)
+    if not total:
+        return PRIX_FORWARD_MOYEN, None
+    return sum(d[3] * d[4] for d in detail) / total, detail
+
+
+def ordre_spot(h, heure=HEURE_SPOT, couverture=None):
     """Les 24 ordres du formulaire EPEX : un volume et un prix limite par heure.
 
     Convention du formulaire : volume positif = achat, negatif = vente.
@@ -318,13 +341,21 @@ def ordre_spot(h, heure=HEURE_SPOT):
     charge = float(h["charge MW"].sum())               # MW sur une heure = MWh
     ruban = float(h["couverture MW"].sum())            # le forward livre ce jour-la
     spot = float((ordres["volume MWh"].to_numpy() * prix).sum())   # + decaisse, - encaisse
-    forward = ruban * PRIX_FORWARD_MOYEN
+    prix_ruban, detail = prix_du_ruban(h, couverture)
+    forward = ruban * prix_ruban
     nu = float(((h["charge MW"] - h["solaire MW"]).to_numpy() * prix).sum())  # tout au spot
     marge = charge * PRIX_VENTE - forward - spot
 
     print("")
+    if detail:
+        print("")
+        print("  Ce que le ruban du jour a reellement coute, produit par produit :")
+        for produit, nature, jalon, mwh, pu in detail:
+            print(f"    {produit:7} {nature:5} achete au {jalon} a {pu:7.2f} EUR/MWh"
+                  f"  ->{mwh:9,.1f} MWh")
+    print("")
     print(f"  Base du jour        {prix.mean():8.2f} EUR/MWh"
-          f"   (paye au forward : {PRIX_FORWARD_MOYEN:.2f})")
+          f"   (paye au forward : {prix_ruban:.2f})")
     print(f"  chiffre d'affaires  {charge * PRIX_VENTE:+12,.0f} EUR"
           f"  ({charge:,.1f} MWh a {PRIX_VENTE:.0f})")
     print(f"  ruban forward       {-forward:+12,.0f} EUR  ({ruban:,.1f} MWh)")
@@ -336,9 +367,12 @@ def ordre_spot(h, heure=HEURE_SPOT):
     print(f"  HEDGE SUCCESS       {nu - forward - spot:+12,.0f} EUR"
           f"  = {(nu - forward - spot) / charge:+.2f} EUR/MWh")
     print("")
-    print("  Le 1er janvier est la journee la plus chere de l'annee : cette marge")
-    print("  negative ne s'extrapole pas aux 364 autres, et le hedge success, lui,")
-    print("  est positif — la couverture a fait exactement son travail.")
+    print(f"  Le ruban du jour revient a {prix_ruban:.2f} EUR/MWh contre un Base realise de"
+          f" {prix.mean():.2f} :")
+    print("  tout le hedge success tient dans cet ecart. La tranche trimestrielle a ete")
+    print("  achetee pour un hiver entier, pas pour ce jour-ci ; le Cal du T2 la compense.")
+    print("  Une seule journee ne juge pas une couverture, surtout un 1er janvier ferie")
+    print("  dont la charge ressemble a un dimanche : le verdict se lit sur 8 760 heures.")
     return ordres
 
 
@@ -386,7 +420,7 @@ def main():
     # ==========================================================================
     # T3 - POINT 4 : ENVOYER LES ORDRES SPOT
     # ==========================================================================
-    ordres = ordre_spot(h)
+    ordres = ordre_spot(h, couverture=apres)
 
     # Guidelines 5.2 : la courbe du jour sous chaque scenario, pas seulement
     # a temperature normale et a temperature prevue.
