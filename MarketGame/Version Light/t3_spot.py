@@ -16,8 +16,9 @@ Duree           : ~2 s
 A changer ici   : T_PREVUE et SOLAIRE (la prevision du 1er janvier),
                   HEURE_SPOT, PRIX_CLEARING. Ce qui est deja achete se
                   change dans outils/position.py (ACHETE).
-A savoir        : PRIX_CLEARING vaut None et le restera jusqu'a la seance :
-                  le prix sort de l'enchere, il n'est publie nulle part avant.
+A savoir        : PRIX_CLEARING est vide jusqu'a la seance — le prix sort de
+                  l'enchere, il n'est publie nulle part avant. Depuis la seance
+                  du 13/10, les 24 prix du groupe A y sont.
 Dans le rapport : etape 15
 """
 import matplotlib.pyplot as plt
@@ -61,7 +62,21 @@ PRIX_VENTE_ILLIMITE = -600.0     # vente price-independent
 
 POSITION = position.ACHETE   # ce qui est deja achete au 31/12 : voir outils/position.py
 
-PRIX_CLEARING = None       # prix spot 14h-15h, publie par le prof apres la session 5
+# Les 24 prix de clearing du 1er janvier 2027, un par heure, 00h-01h en tete
+# (fichier SPOT_DA_Clearing_2027-01-01_Group_A, publie apres la seance). Le mix de
+# production n'est pas le meme pour le groupe B : ces prix-la ne valent que pour nous.
+# Remettre None pour retrouver l'etat d'avant seance.
+PRIX_CLEARING = [70, 10, 10, 10, 10, 10, 10, 10,
+                 70, 70, 70, 70, 70, 70, 70, 70,
+                 180, 180, 500, 500, 500, 180, 180, 70]
+
+# Le ruban livre le 1er janvier a ete paye aux T1 et T2, pas ce jour-la. On lui impute
+# le prix moyen de TOUTE la couverture : le journal ne retient que les MW, pas les prix
+# par produit (outils/position.py), donc c'est une convention d'allocation et pas un
+# releve. Le Q1 ayant ete paye plus cher que la moyenne annuelle — c'est le trimestre
+# d'hiver — la marge du jour calculee ici est un peu optimiste.
+PRIX_FORWARD_MOYEN = 84.06      # EUR/MWh paye en moyenne sur les achats T1 + T2
+PRIX_VENTE = 95.0               # EUR/MWh impose par le Conseil
 
 
 def volumes(base, jalon):
@@ -285,20 +300,45 @@ def ordre_spot(h, heure=HEURE_SPOT):
     print(f"    ordre : {o['sens']} {abs(o['volume MWh']):.2f} MWh"
           f" a {o['prix limite EUR/MWh']:,.0f} EUR/MWh")
 
-    # Tant que le prof n'a pas publie le prix de clearing, aucun hedge success
-    # n'est calculable : il se forme pendant l'enchere, pas avant.
+    # Le prix de clearing se forme pendant l'enchere : rien de ce qui suit
+    # n'est calculable avant qu'il soit publie.
     if PRIX_CLEARING is None:
         print("")
         print("  PRIX_CLEARING non renseigne : le prix sort de l'enchere en seance.")
         print("  Le hedge success se calcule une fois le clearing connu.")
-    else:
-        cout = float((ordres["volume MWh"] * PRIX_CLEARING).sum())
-        cout_nu = float(((h["charge MW"] - h["solaire MW"]) * PRIX_CLEARING).sum())
-        print("")
-        print(f"  prix de clearing   {PRIX_CLEARING:7.2f} EUR/MWh")
-        print(f"  cout de la journee {cout:+12,.0f} EUR"
-              f"  (sans aucune couverture : {cout_nu:+,.0f} EUR)")
-        print(f"  hedge success      {cout_nu - cout:+12,.0f} EUR")
+        return ordres
+
+    if len(PRIX_CLEARING) != len(h):
+        raise ValueError(f"PRIX_CLEARING : {len(PRIX_CLEARING)} prix pour {len(h)} heures")
+
+    # np.asarray et pas une Serie : h est indexe par horodatage et ordres par un
+    # libelle d'heure. Une multiplication entre Series alignerait sur l'index, ne
+    # trouverait aucune correspondance, et renverrait des NaN sans rien signaler.
+    prix = np.asarray(PRIX_CLEARING, dtype=float)
+    charge = float(h["charge MW"].sum())               # MW sur une heure = MWh
+    ruban = float(h["couverture MW"].sum())            # le forward livre ce jour-la
+    spot = float((ordres["volume MWh"].to_numpy() * prix).sum())   # + decaisse, - encaisse
+    forward = ruban * PRIX_FORWARD_MOYEN
+    nu = float(((h["charge MW"] - h["solaire MW"]).to_numpy() * prix).sum())  # tout au spot
+    marge = charge * PRIX_VENTE - forward - spot
+
+    print("")
+    print(f"  Base du jour        {prix.mean():8.2f} EUR/MWh"
+          f"   (paye au forward : {PRIX_FORWARD_MOYEN:.2f})")
+    print(f"  chiffre d'affaires  {charge * PRIX_VENTE:+12,.0f} EUR"
+          f"  ({charge:,.1f} MWh a {PRIX_VENTE:.0f})")
+    print(f"  ruban forward       {-forward:+12,.0f} EUR  ({ruban:,.1f} MWh)")
+    print(f"  solde du spot       {-spot:+12,.0f} EUR")
+    print(f"  marge de la journee {marge:+12,.0f} EUR  = {marge / charge:+.2f} EUR/MWh")
+    print("")
+    print(f"  cout sans couverture{nu:+12,.0f} EUR  (la journee entiere prise au spot)")
+    print(f"  cout reel           {forward + spot:+12,.0f} EUR")
+    print(f"  HEDGE SUCCESS       {nu - forward - spot:+12,.0f} EUR"
+          f"  = {(nu - forward - spot) / charge:+.2f} EUR/MWh")
+    print("")
+    print("  Le 1er janvier est la journee la plus chere de l'annee : cette marge")
+    print("  negative ne s'extrapole pas aux 364 autres, et le hedge success, lui,")
+    print("  est positif — la couverture a fait exactement son travail.")
     return ordres
 
 
