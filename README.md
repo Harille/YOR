@@ -44,7 +44,7 @@ commercial, les prix EEX du jour, et ce qui a deja ete achete. Les formules,
 les probabilites et le critere de choix restent identiques — c'est ce qui rend
 les trois jalons comparables entre eux.
 
-![La chaine de calcul](docs/schema_algorithme.png)
+![La chaine de calcul](MarketGame/Version%20Light/rapport/schema_algorithme.png)
 
 | Etape | Module | Ce qu'elle produit |
 | --- | --- | --- |
@@ -61,7 +61,7 @@ parametres actuels produiraient. Et le coefficient d'anticipation alpha est
 fixe une fois pour toutes, identique pour tous les scenarios : le faire varier
 reviendrait a retenir a chaque fois la valeur qui arrange.
 
-La figure est regeneree par `docs/schema_algorithme.py`.
+La figure est regeneree par `MarketGame/Version Light/rapport/schema_algorithme.py`.
 
 ## Ou est quoi
 
